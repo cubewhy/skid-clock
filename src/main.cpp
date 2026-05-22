@@ -41,11 +41,12 @@ enum SystemState {
   STATE_2048,        // 2048游戏模式
   STATE_DINO,        // 谷歌小恐龙模式
   STATE_BRICK,       // 打砖块游戏模式
+  STATE_STACK,       // 【新增】叠罗汉/堆叠游戏模式
   STATE_PET          // 桌面宠物模式
 };
 SystemState currentState = STATE_CLOCK;
 
-// 主菜单配置（Desktop Pet 插入第四项，Adjust Settings 保持在最后一项）
+// 主菜单配置
 const char *menuItems[] = {"1. Realtime Clock", "2. Calculator",
                            "3. Arcade Games", "4. Desktop Pet",
                            "5. Adjust Settings"};
@@ -54,11 +55,11 @@ const int VISIBLE_ITEMS = 3; // 滚动菜单可见行数
 int currentMenuSelect = 0;
 int menuScrollTop = 0; // 滚动视口顶部索引
 
-// 游戏二级菜单配置
-const char *gameMenuItems[] = {"1. Snake Game",    "2. Gomoku Game",
-                               "3. 2048 Game",     "4. Dino Run",
-                               "5. Brick Breaker", "6. < Back"};
-const int GAMES_TOTAL = 6;
+// 游戏二级菜单配置（插入 Stack 游戏，总数变 7 项）
+const char *gameMenuItems[] = {
+    "1. Snake Game",    "2. Gomoku Game", "3. 2048 Game", "4. Dino Run",
+    "5. Brick Breaker", "6. Stack Tower", "7. < Back"};
+const int GAMES_TOTAL = 7;
 const int VISIBLE_GAMES_ITEMS = 3; // 游戏菜单可见行数
 int currentGamesSelect = 0;
 int gamesScrollTop = 0; // 游戏窗口滚动顶部索引
@@ -91,12 +92,10 @@ enum EditField {
 };
 EditField currentEditField = FIELD_YEAR;
 
-// 绝对时间编辑缓冲区
 int editYear = 2026, editMonth = 1, editDay = 1;
 int editHour = 0, editMinute = 0, editSecond = 0;
 unsigned long lastSettingsTick = 0;
 
-// 获取当前月份的最大天数（精密计算大小月与闰年二月）
 int getMaxDay(int y, int m) {
   if (m == 2) {
     if ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0))
@@ -143,20 +142,20 @@ const int snakeSpeed = 150;
 
 // --- 五子棋游戏模块 ---
 #define GOMOKU_SIZE 10
-int8_t gomokuBoard[GOMOKU_SIZE][GOMOKU_SIZE]; // 0:空, 1:P1(实心), 2:P2/AI(空心)
-int8_t gomokuCx = 4, gomokuCy = 4;            // 光标位置
-bool gomokuIsPvE = true;                      // true:单人, false:双人
-int gomokuDiff = 1;                           // 0:简单, 1:困难
-int8_t gomokuTurn = 1;                        // 1: P1, 2: P2/AI
-int8_t gomokuWinner = 0;  // 0:对局中, 1:P1胜, 2:P2胜, 3:平局
-int gomokuMenuSelect = 0; // 菜单光标
+int8_t gomokuBoard[GOMOKU_SIZE][GOMOKU_SIZE];
+int8_t gomokuCx = 4, gomokuCy = 4;
+bool gomokuIsPvE = true;
+int gomokuDiff = 1;
+int8_t gomokuTurn = 1;
+int8_t gomokuWinner = 0;
+int gomokuMenuSelect = 0;
 
 // --- 2048游戏模块 ---
 int16_t board2048[4][4];
 int score2048 = 0;
 bool gameOver2048 = false;
 
-// --- 谷歌小恐龙模块 (全面重告为Delta-Time浮点数物理) ---
+// --- 谷歌小恐龙模块 ---
 float dinoY = 40.0f;
 float dinoVelocityY = 0.0f;
 bool dinoIsJumping = false;
@@ -165,14 +164,14 @@ float scoreDino = 0.0f;
 bool gameOverDino = false;
 unsigned long lastDinoUpdate = 0;
 
-float dinoGameSpeed = 0.10f;          // 初始横向卷轴速度 (像素/毫秒)
-const float DINO_GRAVITY = 0.00055f;  // 重力加速度 (像素/毫秒^2)
-const float DINO_JUMP_FORCE = -0.17f; // 跳跃初速度 (像素/毫秒)
+float dinoGameSpeed = 0.10f;
+const float DINO_GRAVITY = 0.00055f;
+const float DINO_JUMP_FORCE = -0.17f;
 
 struct Obstacle {
-  float x; // 浮点数X轴，提供亚像素细腻位移
+  float x;
   int16_t y;
-  uint8_t type; // 0: 矮仙人掌, 1: 高仙人掌, 2: 飞鸟
+  uint8_t type;
   bool active;
 };
 #define MAX_OBSTACLES 2
@@ -201,6 +200,27 @@ int scoreBrick = 0;
 bool gameOverBrick = false;
 bool gameWinBrick = false;
 unsigned long lastBrickUpdate = 0;
+
+// --- 【新增】Stack 叠罗汉游戏全局变量 ---
+#define MAX_STACK_LAYERS 40  // 塔的最大存储层数
+#define STACK_BLOCK_HEIGHT 5 // 每个方块的固定厚度/高度
+
+float stackBlockX = 0.0f; // 当前空中悬浮方块的精确X坐标
+int stackBlockWidth = 45; // 当前方块的宽度深度 (初始化较宽，随着裁剪越缩越窄)
+float stackBlockSpeedX = 1.4f; // 悬浮方块水平平移步长速度
+bool stackIsFalling = false;   // 方块是否正处于脱钩自由落体状态
+float stackBlockY = 12.0f;     // 悬浮/下落方块当前Y轴高度
+
+int towerLayerCount = 0;         // 已经成功堆叠安置的层数
+int scoreStack = 0;              // 叠罗汉分数
+bool gameOverStack = false;      // 叠罗汉游戏结束标志
+unsigned long lastStackTick = 0; // 动画更新周期计数器
+
+// 用于历史追踪渲染的数据记录
+int towerWidths[MAX_STACK_LAYERS]; // 每层的物理实际宽度
+int towerXs[MAX_STACK_LAYERS];     // 每层的左侧边界X起点
+int cameraViewOffsetY = 0;         // 镜头随天际线爬升而自动下沉滚动的差值量
+bool joyMoveLatched = false;       // 摇杆触发边缘锁，防止按住摇杆导致连发放置
 
 // --- 输入与节流控制 ---
 unsigned long lastButtonPress = 0;
@@ -249,6 +269,9 @@ void initDinoGame();
 void handleBrickMode(bool clicked);
 void initBrickGame();
 
+void handleStackMode(int vry, int vrx, bool clicked);
+void initStackGame();
+
 void handlePetMode(int vry, int vrx, bool clicked);
 void initPet();
 
@@ -267,7 +290,7 @@ void setup() {
   pinMode(JOY_VRX, INPUT);
   pinMode(JOY_VRY, INPUT);
   pinMode(BTN_BACK, INPUT_PULLUP);
-  pinMode(POT_PIN, INPUT); // 确保ADC通道正常初始化
+  pinMode(POT_PIN, INPUT);
 
   analogSetAttenuation(ADC_11db);
 
@@ -289,7 +312,7 @@ void setup() {
     Rtc.SetDateTime(compiled);
   }
 
-  randomSeed(analogRead(POT_PIN)); // 沿用引脚34作为初始随机种子
+  randomSeed(analogRead(POT_PIN));
   lastActivityTime = millis();
 }
 
@@ -298,10 +321,8 @@ void loop() {
   int vrxVal = analogRead(JOY_VRX);
   int vryVal = analogRead(JOY_VRY);
 
-  // 1. 全局输入活动状态抓取 (用于闲置回归宠物程序判定)
   bool anyInputDetected = false;
 
-  // 摇杆按键消抖
   bool isClicked = false;
   if (swState == LOW && (millis() - lastButtonPress > DEBOUNCE_DELAY)) {
     lastButtonPress = millis();
@@ -309,12 +330,10 @@ void loop() {
     anyInputDetected = true;
   }
 
-  // 检测摇杆偏移量
   if (vrxVal < 1000 || vrxVal > 3000 || vryVal < 1000 || vryVal > 3000) {
     anyInputDetected = true;
   }
 
-  // 返回键非阻塞长短按检测
   int currentBackState = digitalRead(BTN_BACK);
   bool shortPress = false;
   bool longPress = false;
@@ -338,7 +357,6 @@ void loop() {
     }
   }
 
-  // 特例处理打砖块中旋钮变化也属于活动输入
   if (currentState == STATE_BRICK) {
     static int lastPotVal = 0;
     int currentPotVal = analogRead(POT_PIN);
@@ -348,20 +366,17 @@ void loop() {
     lastPotVal = currentPotVal;
   }
 
-  // 更新或处理闲置逻辑状态
   if (anyInputDetected) {
     lastActivityTime = millis();
   } else {
-    // 仅当时钟或主菜单挂机闲置时触发自动转换，防止游戏游玩中挂起
     if ((currentState == STATE_CLOCK || currentState == STATE_MAIN_MENU) &&
         (millis() - lastActivityTime > IDLE_TIMEOUT)) {
       initPet();
       currentState = STATE_PET;
-      lastActivityTime = millis(); // 刷新基准重置
+      lastActivityTime = millis();
     }
   }
 
-  // 返回键状态路由切换
   if (longPress) {
     currentState = STATE_MAIN_MENU;
   } else if (shortPress) {
@@ -369,7 +384,8 @@ void loop() {
       currentState = STATE_GOMOKU_MENU;
     } else if (currentState == STATE_GOMOKU_MENU ||
                currentState == STATE_SNAKE || currentState == STATE_2048 ||
-               currentState == STATE_DINO || currentState == STATE_BRICK) {
+               currentState == STATE_DINO || currentState == STATE_BRICK ||
+               currentState == STATE_STACK) {
       currentState = STATE_GAMES_MENU;
     } else if (currentState == STATE_GAMES_MENU ||
                currentState == STATE_CALCULATOR ||
@@ -377,12 +393,10 @@ void loop() {
                currentState == STATE_PET) {
       currentState = STATE_MAIN_MENU;
     } else if (currentState == STATE_MAIN_MENU) {
-      // 行为更改要求：主菜单页面按返回键直接返回到时钟页面
       currentState = STATE_CLOCK;
     }
   }
 
-  // 核心状态机调度
   switch (currentState) {
   case STATE_MAIN_MENU:
     handleMainMenu(vryVal, vrxVal, isClicked);
@@ -417,6 +431,9 @@ void loop() {
   case STATE_BRICK:
     handleBrickMode(isClicked);
     break;
+  case STATE_STACK:
+    handleStackMode(vryVal, vrxVal, isClicked);
+    break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);
     break;
@@ -430,14 +447,13 @@ void loop() {
 // 7. 模块化业务逻辑实现
 // ==========================================
 
-// --- 主菜单模块 (带滚动窗、滚动条与底栏 GitHub) ---
 void handleMainMenu(int vry, int vrx, bool clicked) {
   if (millis() - lastJoyAction > JOY_DELAY) {
-    if (vry < 1000) { // 向上
+    if (vry < 1000) {
       currentMenuSelect =
           (currentMenuSelect == 0) ? MENU_TOTAL - 1 : currentMenuSelect - 1;
       lastJoyAction = millis();
-    } else if (vry > 3000) { // 向下
+    } else if (vry > 3000) {
       currentMenuSelect = (currentMenuSelect + 1) % MENU_TOTAL;
       lastJoyAction = millis();
     }
@@ -517,7 +533,6 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
   display.print(GITHUB_URL);
 }
 
-// --- 桌面宠物(猫咪)模块核心实现 ---
 void initPet() {
   petState = PET_IDLE;
   petX = 54;
@@ -535,7 +550,6 @@ void handlePetMode(int vry, int vrx, bool clicked) {
 
   unsigned long now = millis();
 
-  // 1. 每隔5秒概率性重组小猫的当前行为状态
   if (now - lastPetStateChange > 5000) {
     lastPetStateChange = now;
     int r = random(0, 3);
@@ -549,7 +563,6 @@ void handlePetMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 2. 帧动画机更新定时节流
   int animInterval = (petState == PET_WALK) ? 140 : 350;
   if (now - lastPetAnimUpdate > animInterval) {
     lastPetAnimUpdate = now;
@@ -557,7 +570,6 @@ void handlePetMode(int vry, int vrx, bool clicked) {
 
     if (petState == PET_WALK) {
       petX += petDir * 2;
-      // 边界碰撞反弹
       if (petX < 5) {
         petX = 5;
         petDir = 1;
@@ -569,41 +581,31 @@ void handlePetMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 3. 图形无闪烁程序化绘制
   display.clearDisplay();
-  display.drawFastHLine(0, 56, 128, SSD1306_WHITE); // 渲染地板界线
+  display.drawFastHLine(0, 56, 128, SSD1306_WHITE);
 
-  // 左上角状态文本
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(2, 2);
   display.print(F("Cat Life~"));
 
-  // ==========================================
-  // 【新增】右上角实时时钟渲染
-  // ==========================================
   RtcDateTime rtcNow = Rtc.GetDateTime();
   char petTimeStr[9];
   sprintf(petTimeStr, "%02d:%02d:%02d", rtcNow.Hour(), rtcNow.Minute(),
           rtcNow.Second());
-  display.setCursor(80, 2); // 128屏幕宽度 - 8字符*6像素 = 80，完美靠右对齐
+  display.setCursor(80, 2);
   display.print(petTimeStr);
-  // ==========================================
 
   int x = petX;
   int y = petY;
 
   if (petState == PET_SLEEP) {
-    // 渲染猫咪在香甜熟睡(侧卧蜷缩状态)
     display.fillRoundRect(x, y + 6, 16, 10, 4, SSD1306_WHITE);
-    // 闭上的眼缝线
     display.drawFastHLine(x + 11, y + 10, 3, SSD1306_BLACK);
-    // 猫耳朵
     display.fillTriangle(x + 9, y + 6, x + 11, y + 2, x + 13, y + 6,
                          SSD1306_BLACK);
     display.drawTriangle(x + 9, y + 6, x + 11, y + 2, x + 13, y + 6,
                          SSD1306_WHITE);
-    // Zzz飘动符号特效
     if (petFrame == 0) {
       display.setCursor(x + 19, y + 2);
       display.print(F("z"));
@@ -615,14 +617,10 @@ void handlePetMode(int vry, int vrx, bool clicked) {
       display.print(F("ZzZ"));
     }
   } else {
-    // 正常渲染 IDLE 或 WALK 姿态下的猫咪图形结构
-    // 躯干
     display.fillRoundRect(x + 2, y + 4, 12, 9, 3, SSD1306_WHITE);
-    // 头颅：根据面向方向进行平移偏移
     int hx = (petDir == 1) ? x + 9 : x - 3;
     display.fillRoundRect(hx, y - 1, 9, 8, 2, SSD1306_WHITE);
 
-    // 猫眼与小耳
     if (petDir == 1) {
       display.fillTriangle(hx + 1, y - 1, hx + 3, y - 4, hx + 5, y - 1,
                            SSD1306_BLACK);
@@ -632,7 +630,7 @@ void handlePetMode(int vry, int vrx, bool clicked) {
                            SSD1306_BLACK);
       display.drawTriangle(hx + 5, y - 1, hx + 7, y - 4, hx + 8, y - 1,
                            SSD1306_WHITE);
-      display.drawPixel(hx + 6, y + 2, SSD1306_BLACK); // 萌眼像素
+      display.drawPixel(hx + 6, y + 2, SSD1306_BLACK);
     } else {
       display.fillTriangle(hx + 1, y - 1, hx + 2, y - 4, hx + 4, y - 1,
                            SSD1306_BLACK);
@@ -642,10 +640,9 @@ void handlePetMode(int vry, int vrx, bool clicked) {
                            SSD1306_BLACK);
       display.drawTriangle(hx + 4, y - 1, hx + 6, y - 4, hx + 8, y - 1,
                            SSD1306_WHITE);
-      display.drawPixel(hx + 2, y + 2, SSD1306_BLACK); // 萌眼像素
+      display.drawPixel(hx + 2, y + 2, SSD1306_BLACK);
     }
 
-    // 四肢交叉交替动力学动作
     if (petState == PET_WALK) {
       if (petFrame % 2 == 0) {
         display.drawLine(x + 4, y + 13, x + 2, y + 16, SSD1306_WHITE);
@@ -659,14 +656,12 @@ void handlePetMode(int vry, int vrx, bool clicked) {
         display.drawLine(x + 13, y + 13, x + 12, y + 16, SSD1306_WHITE);
       }
     } else {
-      // 站立发呆
       display.drawFastVLine(x + 4, y + 13, 3, SSD1306_WHITE);
       display.drawFastVLine(x + 6, y + 13, 3, SSD1306_WHITE);
       display.drawFastVLine(x + 10, y + 13, 3, SSD1306_WHITE);
       display.drawFastVLine(x + 12, y + 13, 3, SSD1306_WHITE);
     }
 
-    // 猫尾巴上下微调波浪线震荡
     int tx = (petDir == 1) ? x + 2 : x + 14;
     int tailWiggle = (petFrame % 2 == 0) ? -2 : 1;
     display.drawLine(tx, y + 6, tx - (petDir * 4), y + 2 + tailWiggle,
@@ -674,14 +669,13 @@ void handlePetMode(int vry, int vrx, bool clicked) {
   }
 }
 
-// --- 游戏二级子菜单 ---
 void handleGamesMenu(int vry, int vrx, bool clicked) {
   if (millis() - lastJoyAction > JOY_DELAY) {
-    if (vry < 1000) { // 向上
+    if (vry < 1000) {
       currentGamesSelect =
           (currentGamesSelect == 0) ? GAMES_TOTAL - 1 : currentGamesSelect - 1;
       lastJoyAction = millis();
-    } else if (vry > 3000) { // 向下
+    } else if (vry > 3000) {
       currentGamesSelect = (currentGamesSelect + 1) % GAMES_TOTAL;
       lastJoyAction = millis();
     }
@@ -716,6 +710,10 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_BRICK;
       break;
     case 5:
+      initStackGame(); // 【新增状态切入】
+      currentState = STATE_STACK;
+      break;
+    case 6:
       currentState = STATE_MAIN_MENU;
       break;
     }
@@ -821,7 +819,7 @@ void handle2048Mode(int vry, int vrx, bool clicked) {
 
   bool moved = false;
   if (millis() - lastJoyAction > JOY_DELAY) {
-    if (vrx < 1000) { // 左滑动
+    if (vrx < 1000) {
       for (int i = 0; i < 4; i++) {
         int target = 0;
         for (int j = 0; j < 4; j++) {
@@ -854,7 +852,7 @@ void handle2048Mode(int vry, int vrx, bool clicked) {
         }
       }
       lastJoyAction = millis();
-    } else if (vrx > 3000) { // 右滑动
+    } else if (vrx > 3000) {
       for (int i = 0; i < 4; i++) {
         int target = 3;
         for (int j = 3; j >= 0; j--) {
@@ -887,7 +885,7 @@ void handle2048Mode(int vry, int vrx, bool clicked) {
         }
       }
       lastJoyAction = millis();
-    } else if (vry < 1000) { // 上滑动
+    } else if (vry < 1000) {
       for (int j = 0; j < 4; j++) {
         int target = 0;
         for (int i = 0; i < 4; i++) {
@@ -920,7 +918,7 @@ void handle2048Mode(int vry, int vrx, bool clicked) {
         }
       }
       lastJoyAction = millis();
-    } else if (vry > 3000) { // 下滑动
+    } else if (vry > 3000) {
       for (int j = 0; j < 4; j++) {
         int target = 3;
         for (int i = 3; i >= 0; i--) {
@@ -1012,7 +1010,7 @@ void initDinoGame() {
   dinoIsDucking = false;
   scoreDino = 0.0f;
   gameOverDino = false;
-  dinoGameSpeed = 0.10f; // 初始速度重置
+  dinoGameSpeed = 0.10f;
   lastDinoUpdate = millis();
   lastObstacleSpawn = 0;
   for (int i = 0; i < MAX_OBSTACLES; i++) {
@@ -1037,7 +1035,6 @@ void handleDinoMode(int vry, int vrx, bool clicked) {
     return;
   }
 
-  // 1. 计算时间差 Delta Time (dt)
   unsigned long now = millis();
   float dt = (float)(now - lastDinoUpdate);
   lastDinoUpdate = now;
@@ -1047,7 +1044,6 @@ void handleDinoMode(int vry, int vrx, bool clicked) {
   if (dt <= 0.0f)
     dt = 1.0f;
 
-  // 2. 采样输入控制
   if (vry > 3000) {
     if (!dinoIsJumping) {
       dinoIsDucking = true;
@@ -1068,13 +1064,11 @@ void handleDinoMode(int vry, int vrx, bool clicked) {
     return;
   }
 
-  // 3. 游戏全局状态渐进平滑加速
   scoreDino += 0.015f * dt;
   dinoGameSpeed += 0.000002f * dt;
   if (dinoGameSpeed > 0.22f)
     dinoGameSpeed = 0.22f;
 
-  // 4. 垂直方向物理实体抛物线计算
   if (dinoIsJumping) {
     dinoY += dinoVelocityY * dt;
     dinoVelocityY += DINO_GRAVITY * dt;
@@ -1085,7 +1079,6 @@ void handleDinoMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 5. 障碍物水平位移与高精度 AABB 碰撞检测
   bool obstacleActive = false;
   for (int i = 0; i < MAX_OBSTACLES; i++) {
     if (obstacles[i].active) {
@@ -1095,19 +1088,16 @@ void handleDinoMode(int vry, int vrx, bool clicked) {
       } else {
         obstacleActive = true;
 
-        // 动态读取人物姿态的碰撞面积
         int dw = dinoIsDucking ? 14 : 10;
         int dh = dinoIsDucking ? 6 : 12;
         int dy = dinoIsDucking ? 46 : (int)dinoY;
         int dx = 15;
 
-        // 读取对应障碍物包围盒
         int ow =
             (obstacles[i].type == 0) ? 6 : ((obstacles[i].type == 1) ? 8 : 10);
         int oh =
             (obstacles[i].type == 0) ? 10 : ((obstacles[i].type == 1) ? 14 : 6);
 
-        // AABB 边界重合检测
         if (dx < (int)obstacles[i].x + ow && dx + dw > (int)obstacles[i].x &&
             dy < obstacles[i].y + oh && dy + dh > obstacles[i].y) {
           gameOverDino = true;
@@ -1117,7 +1107,6 @@ void handleDinoMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 6. 活动障碍生成逻辑
   uint32_t spawnInterval = 1500 / (dinoGameSpeed / 0.10f);
   if (spawnInterval < 600)
     spawnInterval = 600;
@@ -1140,7 +1129,6 @@ void handleDinoMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 7. 高帧率图形渲染
   display.clearDisplay();
   display.drawFastHLine(0, 52, 128, SSD1306_WHITE);
 
@@ -1308,7 +1296,175 @@ void handleBrickMode(bool clicked) {
   display.fillRect((int)brickBallX, (int)brickBallY, 2, 2, SSD1306_WHITE);
 }
 
-// --- 科学表达式解析器基础算法 (递归下降法) ---
+// --- 【新增】Stack 叠罗汉游戏模块实现 ---
+void initStackGame() {
+  scoreStack = 0;
+  towerLayerCount = 0;
+  gameOverStack = false;
+  stackBlockWidth = 45;
+  stackBlockX = (SCREEN_WIDTH - stackBlockWidth) / 2;
+  stackBlockY = 12.0f;
+  stackBlockSpeedX = 1.4f;
+  stackIsFalling = false;
+  cameraViewOffsetY = 0;
+  joyMoveLatched = false;
+
+  memset(towerWidths, 0, sizeof(towerWidths));
+  memset(towerXs, 0, sizeof(towerXs));
+
+  // 初始化地基物理基础层 (安置在数组第 0 层)
+  towerWidths[0] = 50;
+  towerXs[0] = (SCREEN_WIDTH - towerWidths[0]) / 2;
+  towerLayerCount = 1;
+  lastStackTick = millis();
+}
+
+void handleStackMode(int vry, int vrx, bool clicked) {
+  // 1. 游戏结束状态渲染
+  if (gameOverStack) {
+    if (clicked) {
+      currentState = STATE_GAMES_MENU;
+    }
+    display.clearDisplay();
+    display.setTextSize(2);
+    display.setCursor(12, 10);
+    display.println(F("GAME OVER"));
+    display.setTextSize(1);
+    display.setCursor(12, 35);
+    display.print(F("Layers: "));
+    display.println(towerLayerCount - 1);
+    display.setCursor(12, 50);
+    display.println(F("[Click] return Menu"));
+    return;
+  }
+
+  // 点击中键也可以无条件退出到二级菜单
+  if (clicked) {
+    currentState = STATE_GAMES_MENU;
+    return;
+  }
+
+  // 2. 检测摇杆任意方向的推动行为 (用于方块无延迟放置下落)
+  bool joyMoved = (vrx < 1000 || vrx > 3000 || vry < 1000 || vry > 3000);
+
+  if (joyMoved) {
+    if (!joyMoveLatched && !stackIsFalling) {
+      stackIsFalling = true; // 剥离挂载状态，转换为垂直自由落体
+      joyMoveLatched = true; // 锁死防连发边沿
+    }
+  } else {
+    joyMoveLatched = false; // 摇杆完全归中，释放锁链
+  }
+
+  // 3. 定时物理循环（每 25ms 进行一次物理刷新）
+  if (millis() - lastStackTick > 25) {
+    lastStackTick = millis();
+
+    if (!stackIsFalling) {
+      // 阶段 A: 水平钟摆平移往复震荡
+      stackBlockX += stackBlockSpeedX;
+      // 碰到左右边缘无损反弹
+      if (stackBlockX <= 0 || stackBlockX + stackBlockWidth >= SCREEN_WIDTH) {
+        stackBlockSpeedX = -stackBlockSpeedX;
+      }
+    } else {
+      // 阶段 B: 垂直自由落体模式
+      stackBlockY += 3.5f; // 垂直下落步长速度
+
+      // 目标撞击层高度预测判定
+      int targetTopY =
+          58 - (towerLayerCount * STACK_BLOCK_HEIGHT) + cameraViewOffsetY;
+
+      if (stackBlockY >= targetTopY) {
+        stackBlockY = targetTopY;
+        stackIsFalling = false;
+
+        // 获取底座方块的物理左边距与右边距
+        int baseLeft = towerXs[towerLayerCount - 1];
+        int baseRight = baseLeft + towerWidths[towerLayerCount - 1];
+
+        int curLeft = (int)stackBlockX;
+        int curRight = curLeft + stackBlockWidth;
+
+        // 计算高精度一维 AABB 区域交集覆盖面
+        int overlapLeft = max(baseLeft, curLeft);
+        int overlapRight = min(baseRight, curRight);
+
+        if (overlapRight > overlapLeft) {
+          // AABB 对齐交叉面成功 -> 成功安置
+          towerXs[towerLayerCount] = overlapLeft;
+          towerWidths[towerLayerCount] = overlapRight - overlapLeft;
+
+          // 产生精密切割（Chop
+          // 机制）：下一个生成的方块宽度继承缩减后的交叉面宽度
+          stackBlockWidth = towerWidths[towerLayerCount];
+
+          scoreStack += 10;
+          towerLayerCount++;
+
+          // 限制越界以防内存破坏
+          if (towerLayerCount >= MAX_STACK_LAYERS) {
+            initStackGame(); // 满级通关全重置
+            return;
+          }
+
+          // 阶段 C: 镜头垂直视口爬升策略 (如果塔高超出屏幕半山腰，视角下沉滚动)
+          int currentHighestY =
+              58 - (towerLayerCount * STACK_BLOCK_HEIGHT) + cameraViewOffsetY;
+          if (currentHighestY < 24) {
+            cameraViewOffsetY += STACK_BLOCK_HEIGHT;
+          }
+
+          // 重置重构下一个空中滑行方块
+          stackBlockX = random(0, SCREEN_WIDTH - stackBlockWidth);
+          stackBlockY = 12.0f;
+
+          // 随着层数递增自动加快钟摆频率
+          stackBlockSpeedX = (stackBlockSpeedX > 0 ? 1.0f : -1.0f) *
+                             (1.2f + (towerLayerCount * 0.12f));
+          if (abs(stackBlockSpeedX) > 4.5f)
+            stackBlockSpeedX = (stackBlockSpeedX > 0 ? 4.5f : -4.5f);
+
+        } else {
+          // 完全错位坠入深渊 -> Game Over
+          gameOverStack = true;
+        }
+      }
+    }
+  }
+
+  // 4. OLED 像素渲染画布绘制
+  display.clearDisplay();
+
+  // 顶层状态数据抬头板
+  display.setTextSize(1);
+  display.setCursor(2, 0);
+  display.print(F("STACK: "));
+  display.print(towerLayerCount - 1);
+  display.setCursor(80, 0);
+  display.print(F("S:"));
+  display.print(scoreStack);
+  display.drawFastHLine(0, 9, SCREEN_WIDTH, SSD1306_WHITE);
+
+  // 历史堆叠金字塔底座循环光栅化（计入视角滚动的 cameraViewOffsetY 差值）
+  for (int i = 0; i < towerLayerCount; i++) {
+    int drawY = 58 - ((i + 1) * STACK_BLOCK_HEIGHT) + cameraViewOffsetY;
+    // 超出可视高度的下落历史切块不予硬件绘制浪费性能
+    if (drawY > 64)
+      continue;
+    if (drawY < 10)
+      continue;
+
+    display.fillRect(towerXs[i], drawY, towerWidths[i], STACK_BLOCK_HEIGHT - 1,
+                     SSD1306_WHITE);
+  }
+
+  // 空中动态活动方块绘制
+  display.drawRect((int)stackBlockX, (int)stackBlockY, stackBlockWidth,
+                   STACK_BLOCK_HEIGHT - 1, SSD1306_WHITE);
+}
+
+// --- 科学表达式解析器基础算法 ---
 double parseAtom(const char *&p) {
   while (*p == ' ')
     p++;
@@ -1386,7 +1542,6 @@ double parseExpression(const char *&p) {
   return val;
 }
 
-// --- 计算器交互调度模块 ---
 void handleCalculatorMode(int vry, int vrx, bool clicked) {
   if (millis() - lastJoyAction > JOY_DELAY) {
     if (vry < 1000) {
@@ -1497,7 +1652,6 @@ void handleCalculatorMode(int vry, int vrx, bool clicked) {
   display.setTextColor(SSD1306_WHITE);
 }
 
-// --- 时钟运行模块 ---
 void handleClockMode(bool clicked) {
   if (clicked) {
     currentState = STATE_MAIN_MENU;
@@ -1507,32 +1661,28 @@ void handleClockMode(bool clicked) {
   RtcDateTime now = Rtc.GetDateTime();
   display.clearDisplay();
 
-  // 1. 渲染上方日期栏 (Size 1)
   char dateStr[12];
   sprintf(dateStr, "%04d-%02d-%02d", now.Year(), now.Month(), now.Day());
   display.setTextSize(1);
-  display.setCursor(34, 10); // 居中校准：(128 - 10个字符*6像素)/2 = 34
+  display.setCursor(34, 10);
   display.println(dateStr);
 
-  // 2. 渲染中央时间栏 (Size 2)
   char timeStr[9];
   sprintf(timeStr, "%02d:%02d:%02d", now.Hour(), now.Minute(), now.Second());
   display.setTextSize(2);
   display.setCursor(16, 26);
   display.println(timeStr);
 
-  // 3. 底部操作指引
   display.setTextSize(1);
   display.setCursor(19, 52);
   display.print(F("[Click] to Menu"));
 }
 
-// --- 时间设置模块 ---
 void handleSettingsMode(int vry, int vrx, bool clicked) {
   unsigned long nowMs = millis();
   if (nowMs - lastSettingsTick >= 1000) {
     int passedSeconds = (nowMs - lastSettingsTick) / 1000;
-    lastSettingsTick += passedSeconds * 1000; // 步进基准线，防抖防卡顿丢秒
+    lastSettingsTick += passedSeconds * 1000;
 
     editSecond += passedSeconds;
     if (editSecond >= 60) {
@@ -1544,7 +1694,6 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
         if (editHour >= 24) {
           editDay += editHour / 24;
           editHour %= 24;
-          // 处理极端的跨月/跨年后台自动进位
           int maxD = getMaxDay(editYear, editMonth);
           while (editDay > maxD) {
             editDay -= maxD;
@@ -1560,9 +1709,8 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 1. 摇杆左右移动：切换编辑字段 (年->月->日->时->分->秒)
   if (millis() - lastJoyAction > JOY_DELAY) {
-    if (vrx < 1000) { // 向左
+    if (vrx < 1000) {
       if (currentEditField == FIELD_MONTH)
         currentEditField = FIELD_YEAR;
       else if (currentEditField == FIELD_DAY)
@@ -1574,7 +1722,7 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
       else if (currentEditField == FIELD_SECOND)
         currentEditField = FIELD_MINUTE;
       lastJoyAction = millis();
-    } else if (vrx > 3000) { // 向右
+    } else if (vrx > 3000) {
       if (currentEditField == FIELD_YEAR)
         currentEditField = FIELD_MONTH;
       else if (currentEditField == FIELD_MONTH)
@@ -1588,8 +1736,7 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
       lastJoyAction = millis();
     }
 
-    // 2. 摇杆上下移动：单独字段手动增减循环
-    if (vry < 1000) { // 递增
+    if (vry < 1000) {
       if (currentEditField == FIELD_YEAR)
         editYear++;
       else if (currentEditField == FIELD_MONTH) {
@@ -1614,7 +1761,7 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
           editSecond = 0;
       }
       lastJoyAction = millis();
-    } else if (vry > 3000) { // 递减
+    } else if (vry > 3000) {
       if (currentEditField == FIELD_YEAR)
         editYear--;
       else if (currentEditField == FIELD_MONTH) {
@@ -1641,14 +1788,12 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
       lastJoyAction = millis();
     }
 
-    // 边缘安全检查：如果年份或月份被手动改变，导致当前“日”超出了新月份的上限（如7月31变6月），自动截断
     int maxDaysInCurrentMonth = getMaxDay(editYear, editMonth);
     if (editDay > maxDaysInCurrentMonth) {
       editDay = maxDaysInCurrentMonth;
     }
   }
 
-  // 3. 摇杆中键按下：把完美同步了流逝时间的最终值写入 RTC 硬件
   if (clicked) {
     RtcDateTime updated(editYear, editMonth, editDay, editHour, editMinute,
                         editSecond);
@@ -1657,7 +1802,6 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
     return;
   }
 
-  // 4. OLED 画布渲染
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
@@ -1674,7 +1818,6 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
   display.setCursor(10, 38);
   display.print(timeBuf);
 
-  // 5. 像素光标下划线精确对齐
   if (currentEditField == FIELD_YEAR)
     display.fillRect(46, 31, 24, 2, SSD1306_WHITE);
   else if (currentEditField == FIELD_MONTH)
@@ -1843,7 +1986,6 @@ void initGomokuGame() {
   gomokuWinner = 0;
 }
 
-// --- 五子棋核心对局逻辑 ---
 void handleGomokuPlay(int vry, int vrx, bool clicked) {
   if (gomokuWinner != 0) {
     if (clicked)
