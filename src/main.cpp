@@ -41,7 +41,7 @@ enum SystemState {
   STATE_2048,        // 2048游戏模式
   STATE_DINO,        // 谷歌小恐龙模式
   STATE_BRICK,       // 打砖块游戏模式
-  STATE_STACK,       // 【新增】叠罗汉/堆叠游戏模式
+  STATE_STACK,       // 叠罗汉/堆叠游戏模式
   STATE_PET          // 桌面宠物模式
 };
 SystemState currentState = STATE_CLOCK;
@@ -55,7 +55,7 @@ const int VISIBLE_ITEMS = 3; // 滚动菜单可见行数
 int currentMenuSelect = 0;
 int menuScrollTop = 0; // 滚动视口顶部索引
 
-// 游戏二级菜单配置（插入 Stack 游戏，总数变 7 项）
+// 游戏二级菜单配置
 const char *gameMenuItems[] = {
     "1. Snake Game",    "2. Gomoku Game", "3. 2048 Game", "4. Dino Run",
     "5. Brick Breaker", "6. Stack Tower", "7. < Back"};
@@ -80,6 +80,8 @@ int petDir = 1; // 1: 右, -1: 左
 unsigned long lastPetStateChange = 0;
 unsigned long lastPetAnimUpdate = 0;
 int petFrame = 0;
+bool petEnteredViaTimeout =
+    false; // 【新增】标记是否是通过超时挂机进入的宠物模式
 
 // --- 时钟设置模块 ---
 enum EditField {
@@ -201,26 +203,25 @@ bool gameOverBrick = false;
 bool gameWinBrick = false;
 unsigned long lastBrickUpdate = 0;
 
-// --- 【新增】Stack 叠罗汉游戏全局变量 ---
-#define MAX_STACK_LAYERS 40  // 塔的最大存储层数
-#define STACK_BLOCK_HEIGHT 5 // 每个方块的固定厚度/高度
+// --- Stack 叠罗汉游戏全局变量 ---
+#define MAX_STACK_LAYERS 40
+#define STACK_BLOCK_HEIGHT 5
 
-float stackBlockX = 0.0f; // 当前空中悬浮方块的精确X坐标
-int stackBlockWidth = 45; // 当前方块的宽度深度 (初始化较宽，随着裁剪越缩越窄)
-float stackBlockSpeedX = 1.4f; // 悬浮方块水平平移步长速度
-bool stackIsFalling = false;   // 方块是否正处于脱钩自由落体状态
-float stackBlockY = 12.0f;     // 悬浮/下落方块当前Y轴高度
+float stackBlockX = 0.0f;
+int stackBlockWidth = 45;
+float stackBlockSpeedX = 1.4f;
+bool stackIsFalling = false;
+float stackBlockY = 12.0f;
 
-int towerLayerCount = 0;         // 已经成功堆叠安置的层数
-int scoreStack = 0;              // 叠罗汉分数
-bool gameOverStack = false;      // 叠罗汉游戏结束标志
-unsigned long lastStackTick = 0; // 动画更新周期计数器
+int towerLayerCount = 0;
+int scoreStack = 0;
+bool gameOverStack = false;
+unsigned long lastStackTick = 0;
 
-// 用于历史追踪渲染的数据记录
-int towerWidths[MAX_STACK_LAYERS]; // 每层的物理实际宽度
-int towerXs[MAX_STACK_LAYERS];     // 每层的左侧边界X起点
-int cameraViewOffsetY = 0;         // 镜头随天际线爬升而自动下沉滚动的差值量
-bool joyMoveLatched = false;       // 摇杆触发边缘锁，防止按住摇杆导致连发放置
+int towerWidths[MAX_STACK_LAYERS];
+int towerXs[MAX_STACK_LAYERS];
+int cameraViewOffsetY = 0;
+bool joyMoveLatched = false;
 
 // --- 输入与节流控制 ---
 unsigned long lastButtonPress = 0;
@@ -369,14 +370,17 @@ void loop() {
   if (anyInputDetected) {
     lastActivityTime = millis();
   } else {
+    // 仅当时钟或主菜单挂机闲置时触发自动转换
     if ((currentState == STATE_CLOCK || currentState == STATE_MAIN_MENU) &&
         (millis() - lastActivityTime > IDLE_TIMEOUT)) {
+      petEnteredViaTimeout = true;
       initPet();
       currentState = STATE_PET;
       lastActivityTime = millis();
     }
   }
 
+  // 返回键状态路由切换
   if (longPress) {
     currentState = STATE_MAIN_MENU;
   } else if (shortPress) {
@@ -387,10 +391,15 @@ void loop() {
                currentState == STATE_DINO || currentState == STATE_BRICK ||
                currentState == STATE_STACK) {
       currentState = STATE_GAMES_MENU;
+    } else if (currentState == STATE_PET) {
+      if (petEnteredViaTimeout) {
+        currentState = STATE_CLOCK;
+      } else {
+        currentState = STATE_MAIN_MENU;
+      }
     } else if (currentState == STATE_GAMES_MENU ||
                currentState == STATE_CALCULATOR ||
-               currentState == STATE_SETTINGS || currentState == STATE_CLOCK ||
-               currentState == STATE_PET) {
+               currentState == STATE_SETTINGS || currentState == STATE_CLOCK) {
       currentState = STATE_MAIN_MENU;
     } else if (currentState == STATE_MAIN_MENU) {
       currentState = STATE_CLOCK;
@@ -482,6 +491,7 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_GAMES_MENU;
       break;
     case 3:
+      petEnteredViaTimeout = false;
       initPet();
       currentState = STATE_PET;
       break;
@@ -544,7 +554,11 @@ void initPet() {
 
 void handlePetMode(int vry, int vrx, bool clicked) {
   if (clicked) {
-    currentState = STATE_MAIN_MENU;
+    if (petEnteredViaTimeout) {
+      currentState = STATE_CLOCK;
+    } else {
+      currentState = STATE_MAIN_MENU;
+    }
     return;
   }
 
@@ -710,7 +724,7 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_BRICK;
       break;
     case 5:
-      initStackGame(); // 【新增状态切入】
+      initStackGame();
       currentState = STATE_STACK;
       break;
     case 6:
@@ -752,7 +766,6 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
   display.print(F("Back to Menu -> [Back]"));
 }
 
-// --- 2048 游戏模块实现 ---
 void init2048Game() {
   memset(board2048, 0, sizeof(board2048));
   score2048 = 0;
@@ -1002,7 +1015,6 @@ void handle2048Mode(int vry, int vrx, bool clicked) {
   display.print(score2048);
 }
 
-// --- 谷歌小恐龙游戏模块实现 ---
 void initDinoGame() {
   dinoY = 40.0f;
   dinoVelocityY = 0.0f;
@@ -1159,7 +1171,6 @@ void handleDinoMode(int vry, int vrx, bool clicked) {
   display.print((int)scoreDino);
 }
 
-// --- 打砖块游戏模块实现 ---
 void initBrickGame() {
   brickBallX = 64.0f;
   brickBallY = 45.0f;
@@ -1296,7 +1307,6 @@ void handleBrickMode(bool clicked) {
   display.fillRect((int)brickBallX, (int)brickBallY, 2, 2, SSD1306_WHITE);
 }
 
-// --- 【新增】Stack 叠罗汉游戏模块实现 ---
 void initStackGame() {
   scoreStack = 0;
   towerLayerCount = 0;
@@ -1312,7 +1322,6 @@ void initStackGame() {
   memset(towerWidths, 0, sizeof(towerWidths));
   memset(towerXs, 0, sizeof(towerXs));
 
-  // 初始化地基物理基础层 (安置在数组第 0 层)
   towerWidths[0] = 50;
   towerXs[0] = (SCREEN_WIDTH - towerWidths[0]) / 2;
   towerLayerCount = 1;
@@ -1320,7 +1329,6 @@ void initStackGame() {
 }
 
 void handleStackMode(int vry, int vrx, bool clicked) {
-  // 1. 游戏结束状态渲染
   if (gameOverStack) {
     if (clicked) {
       currentState = STATE_GAMES_MENU;
@@ -1338,40 +1346,33 @@ void handleStackMode(int vry, int vrx, bool clicked) {
     return;
   }
 
-  // 点击中键也可以无条件退出到二级菜单
   if (clicked) {
     currentState = STATE_GAMES_MENU;
     return;
   }
 
-  // 2. 检测摇杆任意方向的推动行为 (用于方块无延迟放置下落)
   bool joyMoved = (vrx < 1000 || vrx > 3000 || vry < 1000 || vry > 3000);
 
   if (joyMoved) {
     if (!joyMoveLatched && !stackIsFalling) {
-      stackIsFalling = true; // 剥离挂载状态，转换为垂直自由落体
-      joyMoveLatched = true; // 锁死防连发边沿
+      stackIsFalling = true;
+      joyMoveLatched = true;
     }
   } else {
-    joyMoveLatched = false; // 摇杆完全归中，释放锁链
+    joyMoveLatched = false;
   }
 
-  // 3. 定时物理循环（每 25ms 进行一次物理刷新）
   if (millis() - lastStackTick > 25) {
     lastStackTick = millis();
 
     if (!stackIsFalling) {
-      // 阶段 A: 水平钟摆平移往复震荡
       stackBlockX += stackBlockSpeedX;
-      // 碰到左右边缘无损反弹
       if (stackBlockX <= 0 || stackBlockX + stackBlockWidth >= SCREEN_WIDTH) {
         stackBlockSpeedX = -stackBlockSpeedX;
       }
     } else {
-      // 阶段 B: 垂直自由落体模式
-      stackBlockY += 3.5f; // 垂直下落步长速度
+      stackBlockY += 3.5f;
 
-      // 目标撞击层高度预测判定
       int targetTopY =
           58 - (towerLayerCount * STACK_BLOCK_HEIGHT) + cameraViewOffsetY;
 
@@ -1379,64 +1380,52 @@ void handleStackMode(int vry, int vrx, bool clicked) {
         stackBlockY = targetTopY;
         stackIsFalling = false;
 
-        // 获取底座方块的物理左边距与右边距
         int baseLeft = towerXs[towerLayerCount - 1];
         int baseRight = baseLeft + towerWidths[towerLayerCount - 1];
 
         int curLeft = (int)stackBlockX;
         int curRight = curLeft + stackBlockWidth;
 
-        // 计算高精度一维 AABB 区域交集覆盖面
         int overlapLeft = max(baseLeft, curLeft);
         int overlapRight = min(baseRight, curRight);
 
         if (overlapRight > overlapLeft) {
-          // AABB 对齐交叉面成功 -> 成功安置
           towerXs[towerLayerCount] = overlapLeft;
           towerWidths[towerLayerCount] = overlapRight - overlapLeft;
 
-          // 产生精密切割（Chop
-          // 机制）：下一个生成的方块宽度继承缩减后的交叉面宽度
           stackBlockWidth = towerWidths[towerLayerCount];
 
           scoreStack += 10;
           towerLayerCount++;
 
-          // 限制越界以防内存破坏
           if (towerLayerCount >= MAX_STACK_LAYERS) {
-            initStackGame(); // 满级通关全重置
+            initStackGame();
             return;
           }
 
-          // 阶段 C: 镜头垂直视口爬升策略 (如果塔高超出屏幕半山腰，视角下沉滚动)
           int currentHighestY =
               58 - (towerLayerCount * STACK_BLOCK_HEIGHT) + cameraViewOffsetY;
           if (currentHighestY < 24) {
             cameraViewOffsetY += STACK_BLOCK_HEIGHT;
           }
 
-          // 重置重构下一个空中滑行方块
           stackBlockX = random(0, SCREEN_WIDTH - stackBlockWidth);
           stackBlockY = 12.0f;
 
-          // 随着层数递增自动加快钟摆频率
           stackBlockSpeedX = (stackBlockSpeedX > 0 ? 1.0f : -1.0f) *
                              (1.2f + (towerLayerCount * 0.12f));
           if (abs(stackBlockSpeedX) > 4.5f)
             stackBlockSpeedX = (stackBlockSpeedX > 0 ? 4.5f : -4.5f);
 
         } else {
-          // 完全错位坠入深渊 -> Game Over
           gameOverStack = true;
         }
       }
     }
   }
 
-  // 4. OLED 像素渲染画布绘制
   display.clearDisplay();
 
-  // 顶层状态数据抬头板
   display.setTextSize(1);
   display.setCursor(2, 0);
   display.print(F("STACK: "));
@@ -1446,10 +1435,8 @@ void handleStackMode(int vry, int vrx, bool clicked) {
   display.print(scoreStack);
   display.drawFastHLine(0, 9, SCREEN_WIDTH, SSD1306_WHITE);
 
-  // 历史堆叠金字塔底座循环光栅化（计入视角滚动的 cameraViewOffsetY 差值）
   for (int i = 0; i < towerLayerCount; i++) {
     int drawY = 58 - ((i + 1) * STACK_BLOCK_HEIGHT) + cameraViewOffsetY;
-    // 超出可视高度的下落历史切块不予硬件绘制浪费性能
     if (drawY > 64)
       continue;
     if (drawY < 10)
@@ -1459,7 +1446,6 @@ void handleStackMode(int vry, int vrx, bool clicked) {
                      SSD1306_WHITE);
   }
 
-  // 空中动态活动方块绘制
   display.drawRect((int)stackBlockX, (int)stackBlockY, stackBlockWidth,
                    STACK_BLOCK_HEIGHT - 1, SSD1306_WHITE);
 }
