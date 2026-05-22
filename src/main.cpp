@@ -42,6 +42,7 @@ enum SystemState {
   STATE_DINO,        // 谷歌小恐龙模式
   STATE_BRICK,       // 打砖块游戏模式
   STATE_STACK,       // 叠罗汉/堆叠游戏模式
+  STATE_NAVAL_PLAY,  // 海战棋游戏对局
   STATE_PET,         // 桌面宠物模式
   STATE_TIMERS_MENU, // 时间工具二级菜单
   STATE_STOPWATCH,   // 正计时（秒表）
@@ -65,11 +66,11 @@ const char *timerMenuItems[] = {"1. Stopwatch", "2. Countdown", "3. Pomodoro",
 const int TIMERS_TOTAL = 4;
 int currentTimersSelect = 0;
 
-// 游戏二级菜单配置
+// 游戏二级菜单配置 [已加入海战棋]
 const char *gameMenuItems[] = {
-    "1. Snake Game",    "2. Gomoku Game", "3. 2048 Game", "4. Dino Run",
-    "5. Brick Breaker", "6. Stack Tower", "7. < Back"};
-const int GAMES_TOTAL = 7;
+    "1. Snake Game",    "2. Gomoku Game", "3. 2048 Game",    "4. Dino Run",
+    "5. Brick Breaker", "6. Stack Tower", "7. Naval Battle", "8. < Back"};
+const int GAMES_TOTAL = 8;
 const int VISIBLE_GAMES_ITEMS = 3; // 游戏菜单可见行数
 int currentGamesSelect = 0;
 int gamesScrollTop = 0; // 游戏窗口滚动顶部索引
@@ -254,6 +255,12 @@ int towerXs[MAX_STACK_LAYERS];
 int cameraViewOffsetY = 0;
 bool joyMoveLatched = false;
 
+// --- Naval Battle 海战棋全局变量 ---
+uint8_t navalBoardPlayer[8][8]; // 0:空海域, 1:有船, 2:Miss(未中), 3:Hit(击中)
+uint8_t navalBoardEnemy[8][8];
+int8_t navalCx = 3, navalCy = 3; // 玩家开火探测准星
+uint8_t navalWinner = 0;         // 0:未结束, 1:玩家胜, 2:AI胜
+
 // --- 输入与节流控制 ---
 unsigned long lastButtonPress = 0;
 unsigned long lastJoyAction = 0;
@@ -304,6 +311,12 @@ void initBrickGame();
 void handleStackMode(int vry, int vrx, bool clicked);
 void initStackGame();
 
+void handleNavalPlay(int vry, int vrx, bool clicked);
+void initNavalGame();
+void placeRandomShips(uint8_t board[8][8]);
+bool checkNavalWin(uint8_t board[8][8]);
+void navalAIMove();
+
 void handlePetMode(int vry, int vrx, bool clicked);
 void initPet();
 
@@ -349,7 +362,8 @@ void setup() {
     Rtc.SetDateTime(compiled);
   }
 
-  randomSeed(analogRead(POT_PIN));
+  // 混合电位器输入与时间产生更好的伪随机数种子
+  randomSeed(analogRead(POT_PIN) + Rtc.GetDateTime().Second());
   lastActivityTime = millis();
 }
 
@@ -415,7 +429,7 @@ void loop() {
     }
   }
 
-  // 返回键状态路由切换
+  // 返回键状态路由切换 [增加海战棋退出支持]
   if (longPress) {
     currentState = STATE_MAIN_MENU;
   } else if (shortPress) {
@@ -424,7 +438,8 @@ void loop() {
     } else if (currentState == STATE_GOMOKU_MENU ||
                currentState == STATE_SNAKE || currentState == STATE_2048 ||
                currentState == STATE_DINO || currentState == STATE_BRICK ||
-               currentState == STATE_STACK) {
+               currentState == STATE_STACK ||
+               currentState == STATE_NAVAL_PLAY) {
       currentState = STATE_GAMES_MENU;
     } else if (currentState == STATE_PET) {
       if (petEnteredViaTimeout) {
@@ -493,6 +508,9 @@ void loop() {
     break;
   case STATE_STACK:
     handleStackMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_NAVAL_PLAY:
+    handleNavalPlay(vryVal, vrxVal, isClicked);
     break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);
@@ -815,6 +833,10 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_STACK;
       break;
     case 6:
+      initNavalGame();
+      currentState = STATE_NAVAL_PLAY;
+      break;
+    case 7:
       currentState = STATE_MAIN_MENU;
       break;
     }
@@ -1535,6 +1557,189 @@ void handleStackMode(int vry, int vrx, bool clicked) {
 
   display.drawRect((int)stackBlockX, (int)stackBlockY, stackBlockWidth,
                    STACK_BLOCK_HEIGHT - 1, SSD1306_WHITE);
+}
+
+// --- Naval Battle 海战棋游戏模块 ---
+void initNavalGame() {
+  navalWinner = 0;
+  navalCx = 3;
+  navalCy = 3;
+  placeRandomShips(navalBoardPlayer);
+  placeRandomShips(navalBoardEnemy);
+}
+
+void placeRandomShips(uint8_t board[8][8]) {
+  memset(board, 0, 64);
+  int shipSizes[] = {4, 3, 2, 2}; // 4艘不同尺寸的战舰
+  for (int s = 0; s < 4; s++) {
+    int size = shipSizes[s];
+    bool placed = false;
+    while (!placed) {
+      int dir = random(0, 2); // 0: 横向, 1: 纵向
+      int x = random(0, 8);
+      int y = random(0, 8);
+
+      bool valid = true;
+      for (int i = 0; i < size; i++) {
+        int tx = x + (dir == 0 ? i : 0);
+        int ty = y + (dir == 1 ? i : 0);
+        if (tx >= 8 || ty >= 8 || board[tx][ty] != 0) {
+          valid = false;
+          break;
+        }
+      }
+
+      if (valid) {
+        for (int i = 0; i < size; i++) {
+          int tx = x + (dir == 0 ? i : 0);
+          int ty = y + (dir == 1 ? i : 0);
+          board[tx][ty] = 1; // 标记战舰载体
+        }
+        placed = true;
+      }
+    }
+  }
+}
+
+bool checkNavalWin(uint8_t board[8][8]) {
+  for (int x = 0; x < 8; x++) {
+    for (int y = 0; y < 8; y++) {
+      if (board[x][y] == 1) // 只要还有存活的战舰格子，就没有输
+        return false;
+    }
+  }
+  return true;
+}
+
+void navalAIMove() {
+  while (true) {
+    int rx = random(0, 8);
+    int ry = random(0, 8);
+    uint8_t val = navalBoardPlayer[rx][ry];
+    if (val == 0 || val == 1) { // 避开开火过的格子
+      if (val == 1) {
+        navalBoardPlayer[rx][ry] = 3; // Hit
+      } else {
+        navalBoardPlayer[rx][ry] = 2; // Miss
+      }
+      if (checkNavalWin(navalBoardPlayer)) {
+        navalWinner = 2; // AI胜
+      }
+      break;
+    }
+  }
+}
+
+void handleNavalPlay(int vry, int vrx, bool clicked) {
+  if (navalWinner != 0) {
+    if (clicked)
+      currentState = STATE_GAMES_MENU;
+    display.clearDisplay();
+    display.setTextSize(2);
+    display.setCursor(12, 12);
+    if (navalWinner == 1)
+      display.println(F("YOU WIN!"));
+    else
+      display.println(F("AI WIN!"));
+    display.setTextSize(1);
+    display.setCursor(12, 45);
+    display.println(F("[Click] Return Menu"));
+    return;
+  }
+
+  // 操纵玩家准星
+  if (millis() - lastJoyAction > JOY_DELAY) {
+    if (vry < 1000 && navalCy > 0) {
+      navalCy--;
+      lastJoyAction = millis();
+    } else if (vry > 3000 && navalCy < 7) {
+      navalCy++;
+      lastJoyAction = millis();
+    }
+    if (vrx < 1000 && navalCx > 0) {
+      navalCx--;
+      lastJoyAction = millis();
+    } else if (vrx > 3000 && navalCx < 7) {
+      navalCx++;
+      lastJoyAction = millis();
+    }
+  }
+
+  // 玩家开火逻辑
+  if (clicked) {
+    uint8_t val = navalBoardEnemy[navalCx][navalCy];
+    if (val == 0 || val == 1) {
+      if (val == 1) {
+        navalBoardEnemy[navalCx][navalCy] = 3; // 击中
+      } else {
+        navalBoardEnemy[navalCx][navalCy] = 2; // 未中
+      }
+
+      if (checkNavalWin(navalBoardEnemy)) {
+        navalWinner = 1; // 玩家胜利
+        return;
+      }
+
+      // 玩家开火后，立刻轮到 AI 自动还击
+      navalAIMove();
+    }
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print(F("NAVAL BATTLE"));
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+  int startY = 14, cellS = 5;
+
+  // 1. 绘制左侧阵地（我方编队）
+  int startX1 = 4;
+  display.drawRect(startX1 - 1, startY - 1, 8 * cellS + 2, 8 * cellS + 2,
+                   SSD1306_WHITE);
+  for (int x = 0; x < 8; x++) {
+    for (int y = 0; y < 8; y++) {
+      uint8_t val = navalBoardPlayer[x][y];
+      int cx = startX1 + x * cellS;
+      int cy = startY + y * cellS;
+      if (val == 1) { // 我方战舰本体（空心轮廓）
+        display.drawRect(cx + 1, cy + 1, cellS - 2, cellS - 2, SSD1306_WHITE);
+      } else if (val == 2) { // 敌方未击中
+        display.drawPixel(cx + 2, cy + 2, SSD1306_WHITE);
+      } else if (val == 3) { // 我方战舰遇袭受损（实心）
+        display.fillRect(cx + 1, cy + 1, cellS - 2, cellS - 2, SSD1306_WHITE);
+      }
+    }
+  }
+
+  // 2. 绘制右侧阵地（敌方雷达迷雾）
+  int startX2 = 68;
+  display.drawRect(startX2 - 1, startY - 1, 8 * cellS + 2, 8 * cellS + 2,
+                   SSD1306_WHITE);
+  for (int x = 0; x < 8; x++) {
+    for (int y = 0; y < 8; y++) {
+      uint8_t val = navalBoardEnemy[x][y];
+      int cx = startX2 + x * cellS;
+      int cy = startY + y * cellS;
+      // 注意：不能暴露隐蔽的敌机实体(val == 1)
+      if (val == 2) { // 我方未击中
+        display.drawPixel(cx + 2, cy + 2, SSD1306_WHITE);
+      } else if (val == 3) { // 成功捕获击中敌舰
+        display.fillRect(cx + 1, cy + 1, cellS - 2, cellS - 2, SSD1306_WHITE);
+      }
+    }
+  }
+
+  // 3. 在雷达图上绘制准星追踪
+  int curX = startX2 + navalCx * cellS;
+  int curY = startY + navalCy * cellS;
+  display.drawRect(curX, curY, cellS, cellS, SSD1306_WHITE);
+
+  // 4. 底部标志文本
+  display.setCursor(4, 56);
+  display.print(F("MY FLEET"));
+  display.setCursor(68, 56);
+  display.print(F("EN RADAR"));
 }
 
 // --- 科学表达式解析器基础算法 ---
@@ -2363,7 +2568,6 @@ void handleStopwatch(int vry, int vrx, bool clicked) {
     stopwatchLastTime = now;
   }
 
-  // 展开时间要素
   unsigned long totalSec = stopwatchElapsed / 1000;
   int ms100 = (stopwatchElapsed % 1000) / 100; // 百毫秒位
   int sec = totalSec % 60;
@@ -2378,7 +2582,6 @@ void handleStopwatch(int vry, int vrx, bool clicked) {
   display.print(stopwatchRunning ? F("RUN") : F("PAUS"));
   display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
 
-  // 绘制大字时间
   char buf[16];
   sprintf(buf, "%02d:%02d:%02d", hour * 60 + min, sec, ms100);
   display.setTextSize(2);
@@ -2392,30 +2595,27 @@ void handleStopwatch(int vry, int vrx, bool clicked) {
 
 void handleCountdown(int vry, int vrx, bool clicked) {
   if (countdownSettingMode) {
-    // 设置模式：通过摇杆调整参数
     if (millis() - lastJoyAction > JOY_DELAY) {
       if (vrx < 1000) {
         countdownEditField = 0;
         lastJoyAction = millis();
-      } // 选分
-      else if (vrx > 3000) {
+      } else if (vrx > 3000) {
         countdownEditField = 1;
         lastJoyAction = millis();
-      } // 选秒
+      }
 
       int delta = (vry < 1000) ? 1 : ((vry > 3000) ? -1 : 0);
       if (delta != 0) {
-        if (countdownEditField == 0) { // 增减分
+        if (countdownEditField == 0) {
           countdownTotalSec += delta * 60;
           if (countdownTotalSec < 10)
-            countdownTotalSec = 10; // 最低10秒
-        } else {                    // 增减秒
+            countdownTotalSec = 10;
+        } else {
           countdownTotalSec += delta;
           if (countdownTotalSec < 10)
             countdownTotalSec = 10;
         }
-        countdownTotalSec =
-            constrain(countdownTotalSec, 10, 5999); // 限制在99分59秒内
+        countdownTotalSec = constrain(countdownTotalSec, 10, 5999);
         lastJoyAction = millis();
       }
     }
@@ -2427,7 +2627,6 @@ void handleCountdown(int vry, int vrx, bool clicked) {
       countdownStartTime = millis();
     }
   } else {
-    // 运行模式
     if (clicked) {
       countdownRunning = !countdownRunning;
       if (countdownRunning)
@@ -2443,12 +2642,11 @@ void handleCountdown(int vry, int vrx, bool clicked) {
 
         if (countdownRemainingSec <= 0) {
           countdownRemainingSec = 0;
-          countdownRunning = false; // 时间到
+          countdownRunning = false;
         }
       }
     }
 
-    // 向下摇杆退出运行状态，回到设置
     if (millis() - lastJoyAction > JOY_DELAY && vry > 3000) {
       countdownRunning = false;
       countdownSettingMode = true;
@@ -2456,7 +2654,6 @@ void handleCountdown(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 渲染
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
@@ -2478,11 +2675,10 @@ void handleCountdown(int vry, int vrx, bool clicked) {
   display.setCursor(0, 55);
   if (countdownSettingMode) {
     display.print(F("X:Switch Y:+- [Click]Go"));
-    // 设定模式下绘制下划线强调高亮选择
     if (countdownEditField == 0)
-      display.fillRect(34, 41, 22, 2, SSD1306_WHITE); // 分
+      display.fillRect(34, 41, 22, 2, SSD1306_WHITE);
     else
-      display.fillRect(70, 41, 22, 2, SSD1306_WHITE); // 秒
+      display.fillRect(70, 41, 22, 2, SSD1306_WHITE);
   } else {
     if (countdownRemainingSec == 0) {
       display.print(F("TIME UP! [Joy-D] Return"));
@@ -2496,15 +2692,14 @@ void handleCountdown(int vry, int vrx, bool clicked) {
 void handlePomodoro(int vry, int vrx, bool clicked) {
   if (clicked) {
     if (pomoState == POMO_PAUSE) {
-      pomoState = pomoPrevState; // 恢复恢复
+      pomoState = pomoPrevState;
       pomoLastTick = millis();
     } else {
-      pomoPrevState = pomoState; // 备份当前是工作还是休息
+      pomoPrevState = pomoState;
       pomoState = POMO_PAUSE;
     }
   }
 
-  // 状态机运行时钟滴答
   if (pomoState != POMO_PAUSE) {
     unsigned long now = millis();
     if (now - pomoLastTick >= 1000) {
@@ -2513,22 +2708,20 @@ void handlePomodoro(int vry, int vrx, bool clicked) {
       pomoLastTick += passed * 1000;
 
       if (pomoRemainingSec <= 0) {
-        // 状态流转机制
         if (pomoState == POMO_WORK) {
           pomoCompletedCycles++;
           pomoState = POMO_BREAK;
-          pomoRemainingSec = 300; // 短休 5 分钟 = 300秒
+          pomoRemainingSec = 300;
         } else {
           pomoState = POMO_WORK;
-          pomoRemainingSec = pomoConfigWorkMin * 60; // 重新进入工作
+          pomoRemainingSec = pomoConfigWorkMin * 60;
         }
         pomoPrevState = pomoState;
-        pomoState = POMO_PAUSE; // 转换周期时强制暂停，提示用户确认切入
+        pomoState = POMO_PAUSE;
       }
     }
   }
 
-  // 渲染
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
@@ -2542,7 +2735,6 @@ void handlePomodoro(int vry, int vrx, bool clicked) {
   }
   display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
 
-  // 绘制剩余倒计时
   int m = pomoRemainingSec / 60;
   int s = pomoRemainingSec % 60;
   char buf[8];
@@ -2551,7 +2743,6 @@ void handlePomodoro(int vry, int vrx, bool clicked) {
   display.setCursor(34, 20);
   display.print(buf);
 
-  // 进度条渲染
   long totalDenom = (pomoState == POMO_BREAK ||
                      (pomoState == POMO_PAUSE && pomoPrevState == POMO_BREAK))
                         ? 300
@@ -2561,7 +2752,6 @@ void handlePomodoro(int vry, int vrx, bool clicked) {
   display.drawRect(14, 40, 100, 5, SSD1306_WHITE);
   display.fillRect(14, 40, barWidth, 5, SSD1306_WHITE);
 
-  // 状态统计
   display.setTextSize(1);
   display.setCursor(0, 55);
   display.print(F("Done:"));
