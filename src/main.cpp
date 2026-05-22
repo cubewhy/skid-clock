@@ -80,8 +80,7 @@ int petDir = 1; // 1: 右, -1: 左
 unsigned long lastPetStateChange = 0;
 unsigned long lastPetAnimUpdate = 0;
 int petFrame = 0;
-bool petEnteredViaTimeout =
-    false; // 【新增】标记是否是通过超时挂机进入的宠物模式
+bool petEnteredViaTimeout = false; // 标记是否是通过超时挂机进入的宠物模式
 
 // --- 时钟设置模块 ---
 enum EditField {
@@ -370,7 +369,6 @@ void loop() {
   if (anyInputDetected) {
     lastActivityTime = millis();
   } else {
-    // 仅当时钟或主菜单挂机闲置时触发自动转换
     if ((currentState == STATE_CLOCK || currentState == STATE_MAIN_MENU) &&
         (millis() - lastActivityTime > IDLE_TIMEOUT)) {
       petEnteredViaTimeout = true;
@@ -456,14 +454,24 @@ void loop() {
 // 7. 模块化业务逻辑实现
 // ==========================================
 
+// --- 主菜单模块 (支持摇杆向左返回，向右选中) ---
 void handleMainMenu(int vry, int vrx, bool clicked) {
+  bool selectTriggered = clicked;
+
   if (millis() - lastJoyAction > JOY_DELAY) {
-    if (vry < 1000) {
+    if (vry < 1000) { // 向上
       currentMenuSelect =
           (currentMenuSelect == 0) ? MENU_TOTAL - 1 : currentMenuSelect - 1;
       lastJoyAction = millis();
-    } else if (vry > 3000) {
+    } else if (vry > 3000) { // 向下
       currentMenuSelect = (currentMenuSelect + 1) % MENU_TOTAL;
+      lastJoyAction = millis();
+    } else if (vrx < 1000) { // back
+      currentState = STATE_CLOCK;
+      lastJoyAction = millis();
+      return;
+    } else if (vrx > 3000) { // confirm
+      selectTriggered = true;
       lastJoyAction = millis();
     }
 
@@ -474,7 +482,7 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
     }
   }
 
-  if (clicked) {
+  if (selectTriggered) {
     switch (currentMenuSelect) {
     case 0:
       currentState = STATE_CLOCK;
@@ -683,14 +691,24 @@ void handlePetMode(int vry, int vrx, bool clicked) {
   }
 }
 
+// --- 游戏二级子菜单 (支持摇杆向左返回，向右选中) ---
 void handleGamesMenu(int vry, int vrx, bool clicked) {
+  bool selectTriggered = clicked;
+
   if (millis() - lastJoyAction > JOY_DELAY) {
-    if (vry < 1000) {
+    if (vry < 1000) { // 向上
       currentGamesSelect =
           (currentGamesSelect == 0) ? GAMES_TOTAL - 1 : currentGamesSelect - 1;
       lastJoyAction = millis();
-    } else if (vry > 3000) {
+    } else if (vry > 3000) { // 向下
       currentGamesSelect = (currentGamesSelect + 1) % GAMES_TOTAL;
+      lastJoyAction = millis();
+    } else if (vrx < 1000) { // back
+      currentState = STATE_MAIN_MENU;
+      lastJoyAction = millis();
+      return;
+    } else if (vrx > 3000) { // confirm
+      selectTriggered = true;
       lastJoyAction = millis();
     }
 
@@ -701,7 +719,7 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
     }
   }
 
-  if (clicked) {
+  if (selectTriggered) {
     switch (currentGamesSelect) {
     case 0:
       initSnakeGame();
