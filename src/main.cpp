@@ -42,18 +42,28 @@ enum SystemState {
   STATE_DINO,        // 谷歌小恐龙模式
   STATE_BRICK,       // 打砖块游戏模式
   STATE_STACK,       // 叠罗汉/堆叠游戏模式
-  STATE_PET          // 桌面宠物模式
+  STATE_PET,         // 桌面宠物模式
+  STATE_TIMERS_MENU, // 时间工具二级菜单
+  STATE_STOPWATCH,   // 正计时（秒表）
+  STATE_COUNTDOWN,   // 倒计时
+  STATE_POMODORO     // 番茄钟
 };
 SystemState currentState = STATE_CLOCK;
 
 // 主菜单配置
 const char *menuItems[] = {"1. Realtime Clock", "2. Calculator",
-                           "3. Arcade Games", "4. Desktop Pet",
-                           "5. Adjust Settings"};
-const int MENU_TOTAL = 5;
+                           "3. Arcade Games",   "4. Time Tools",
+                           "5. Desktop Pet",    "6. Adjust Settings"};
+const int MENU_TOTAL = 6;
 const int VISIBLE_ITEMS = 3; // 滚动菜单可见行数
 int currentMenuSelect = 0;
 int menuScrollTop = 0; // 滚动视口顶部索引
+
+// 时间工具二级菜单配置
+const char *timerMenuItems[] = {"1. Stopwatch", "2. Countdown", "3. Pomodoro",
+                                "4. < Back"};
+const int TIMERS_TOTAL = 4;
+int currentTimersSelect = 0;
 
 // 游戏二级菜单配置
 const char *gameMenuItems[] = {
@@ -70,6 +80,28 @@ int gamesScrollTop = 0; // 游戏窗口滚动顶部索引
 
 // --- 闲置状态检测 ---
 unsigned long lastActivityTime = 0;
+
+// --- 正计时（秒表）变量 ---
+unsigned long stopwatchElapsed = 0; // 累计毫秒数
+unsigned long stopwatchLastTime = 0;
+bool stopwatchRunning = false;
+
+// --- 倒计时变量 ---
+long countdownTotalSec = 300; // 默认5分钟 (300秒)
+unsigned long countdownStartTime = 0;
+long countdownRemainingSec = 300;
+bool countdownRunning = false;
+bool countdownSettingMode = true; // 或者是运行模式
+int countdownEditField = 0;       // 0:分, 1:秒
+
+// --- 番茄钟变量 ---
+enum PomoState { POMO_WORK, POMO_BREAK, POMO_PAUSE };
+PomoState pomoState = POMO_PAUSE;
+PomoState pomoPrevState = POMO_WORK; // 记录暂停前的状态（工作/短休）
+long pomoRemainingSec = 1500;        // 25分钟 = 1500秒
+unsigned long pomoLastTick = 0;
+int pomoCompletedCycles = 0;
+int pomoConfigWorkMin = 25; // 可配置工作时长
 
 // --- 桌面宠物(猫咪)模块 ---
 enum PetState { PET_IDLE, PET_WALK, PET_SLEEP };
@@ -275,6 +307,11 @@ void initStackGame();
 void handlePetMode(int vry, int vrx, bool clicked);
 void initPet();
 
+void handleTimersMenu(int vry, int vrx, bool clicked);
+void handleStopwatch(int vry, int vrx, bool clicked);
+void handleCountdown(int vry, int vrx, bool clicked);
+void handlePomodoro(int vry, int vrx, bool clicked);
+
 double parseExpression(const char *&p);
 double parseTerm(const char *&p);
 double parsePower(const char *&p);
@@ -401,6 +438,14 @@ void loop() {
       currentState = STATE_MAIN_MENU;
     } else if (currentState == STATE_MAIN_MENU) {
       currentState = STATE_CLOCK;
+    } else if (currentState == STATE_TIMERS_MENU ||
+               currentState == STATE_CALCULATOR ||
+               currentState == STATE_SETTINGS || currentState == STATE_CLOCK) {
+      currentState = STATE_MAIN_MENU;
+    } else if (currentState == STATE_STOPWATCH ||
+               currentState == STATE_COUNTDOWN ||
+               currentState == STATE_POMODORO) {
+      currentState = STATE_TIMERS_MENU;
     }
   }
 
@@ -413,7 +458,6 @@ void loop() {
         (vrxVal < 1000 || vrxVal > 3000 || vryVal < 1000 || vryVal > 3000)) {
       if (isClicked || (millis() - lastJoyAction > JOY_DELAY)) {
         if (!isClicked) {
-          lastJoyAction = millis();
         }
         currentState = STATE_MAIN_MENU;
       }
@@ -452,6 +496,18 @@ void loop() {
     break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_TIMERS_MENU:
+    handleTimersMenu(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_STOPWATCH:
+    handleStopwatch(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_COUNTDOWN:
+    handleCountdown(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_POMODORO:
+    handlePomodoro(vryVal, vrxVal, isClicked);
     break;
   }
 
@@ -508,11 +564,15 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_GAMES_MENU;
       break;
     case 3:
+      currentTimersSelect = 0;
+      currentState = STATE_TIMERS_MENU;
+      break;
+    case 4:
       petEnteredViaTimeout = false;
       initPet();
       currentState = STATE_PET;
       break;
-    case 4:
+    case 5:
       RtcDateTime nowSettings = Rtc.GetDateTime();
       editYear = nowSettings.Year();
       editMonth = nowSettings.Month();
@@ -2219,4 +2279,293 @@ int evaluateGomokuPoint(int x, int y, int role) {
       totalWeight += 30;
   }
   return totalWeight;
+}
+
+void handleTimersMenu(int vry, int vrx, bool clicked) {
+  bool selectTriggered = clicked;
+  if (millis() - lastJoyAction > JOY_DELAY) {
+    if (vry < 1000) { // 向上
+      currentTimersSelect = (currentTimersSelect == 0)
+                                ? TIMERS_TOTAL - 1
+                                : currentTimersSelect - 1;
+      lastJoyAction = millis();
+    } else if (vry > 3000) { // 向下
+      currentTimersSelect = (currentTimersSelect + 1) % TIMERS_TOTAL;
+      lastJoyAction = millis();
+    } else if (vrx < 1000) { // 向左返回
+      currentState = STATE_MAIN_MENU;
+      lastJoyAction = millis();
+      return;
+    } else if (vrx > 3000) { // 向右确认
+      selectTriggered = true;
+      lastJoyAction = millis();
+    }
+  }
+
+  if (selectTriggered) {
+    switch (currentTimersSelect) {
+    case 0: // 启动正计时
+      stopwatchElapsed = 0;
+      stopwatchRunning = false;
+      currentState = STATE_STOPWATCH;
+      break;
+    case 1: // 启动倒计时配置
+      countdownRunning = false;
+      countdownSettingMode = true;
+      countdownEditField = 0;
+      currentState = STATE_COUNTDOWN;
+      break;
+    case 2: // 启动番茄钟
+      pomoState = POMO_PAUSE;
+      pomoPrevState = POMO_WORK;
+      pomoRemainingSec = pomoConfigWorkMin * 60;
+      currentState = STATE_POMODORO;
+      break;
+    case 3:
+      currentState = STATE_MAIN_MENU;
+      break;
+    }
+    return;
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println(F("=== TIME TOOLS ==="));
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+  for (int i = 0; i < TIMERS_TOTAL; i++) {
+    display.setCursor(5, 16 + (i * 11));
+    if (i == currentTimersSelect)
+      display.print(F("> "));
+    else
+      display.print(F("  "));
+    display.println(timerMenuItems[i]);
+  }
+}
+
+void handleStopwatch(int vry, int vrx, bool clicked) {
+  if (clicked) {
+    stopwatchRunning = !stopwatchRunning;
+    if (stopwatchRunning)
+      stopwatchLastTime = millis();
+  }
+
+  if (millis() - lastJoyAction > JOY_DELAY && vry > 3000) { // 向下重置
+    stopwatchRunning = false;
+    stopwatchElapsed = 0;
+    lastJoyAction = millis();
+  }
+
+  if (stopwatchRunning) {
+    unsigned long now = millis();
+    stopwatchElapsed += (now - stopwatchLastTime);
+    stopwatchLastTime = now;
+  }
+
+  // 展开时间要素
+  unsigned long totalSec = stopwatchElapsed / 1000;
+  int ms100 = (stopwatchElapsed % 1000) / 100; // 百毫秒位
+  int sec = totalSec % 60;
+  int min = (totalSec / 60) % 60;
+  int hour = totalSec / 3600;
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print(F("STOPWATCH"));
+  display.setCursor(85, 0);
+  display.print(stopwatchRunning ? F("RUN") : F("PAUS"));
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+  // 绘制大字时间
+  char buf[16];
+  sprintf(buf, "%02d:%02d:%02d", hour * 60 + min, sec, ms100);
+  display.setTextSize(2);
+  display.setCursor(16, 25);
+  display.print(buf);
+
+  display.setTextSize(1);
+  display.setCursor(0, 55);
+  display.print(F("[Click]Paus  [Joy-D]Rst"));
+}
+
+void handleCountdown(int vry, int vrx, bool clicked) {
+  if (countdownSettingMode) {
+    // 设置模式：通过摇杆调整参数
+    if (millis() - lastJoyAction > JOY_DELAY) {
+      if (vrx < 1000) {
+        countdownEditField = 0;
+        lastJoyAction = millis();
+      } // 选分
+      else if (vrx > 3000) {
+        countdownEditField = 1;
+        lastJoyAction = millis();
+      } // 选秒
+
+      int delta = (vry < 1000) ? 1 : ((vry > 3000) ? -1 : 0);
+      if (delta != 0) {
+        if (countdownEditField == 0) { // 增减分
+          countdownTotalSec += delta * 60;
+          if (countdownTotalSec < 10)
+            countdownTotalSec = 10; // 最低10秒
+        } else {                    // 增减秒
+          countdownTotalSec += delta;
+          if (countdownTotalSec < 10)
+            countdownTotalSec = 10;
+        }
+        countdownTotalSec =
+            constrain(countdownTotalSec, 10, 5999); // 限制在99分59秒内
+        lastJoyAction = millis();
+      }
+    }
+
+    if (clicked) {
+      countdownRemainingSec = countdownTotalSec;
+      countdownRunning = true;
+      countdownSettingMode = false;
+      countdownStartTime = millis();
+    }
+  } else {
+    // 运行模式
+    if (clicked) {
+      countdownRunning = !countdownRunning;
+      if (countdownRunning)
+        countdownStartTime = millis();
+    }
+
+    if (countdownRunning) {
+      unsigned long now = millis();
+      if (now - countdownStartTime >= 1000) {
+        long passedSec = (now - countdownStartTime) / 1000;
+        countdownRemainingSec -= passedSec;
+        countdownStartTime += passedSec * 1000;
+
+        if (countdownRemainingSec <= 0) {
+          countdownRemainingSec = 0;
+          countdownRunning = false; // 时间到
+        }
+      }
+    }
+
+    // 向下摇杆退出运行状态，回到设置
+    if (millis() - lastJoyAction > JOY_DELAY && vry > 3000) {
+      countdownRunning = false;
+      countdownSettingMode = true;
+      lastJoyAction = millis();
+    }
+  }
+
+  // 渲染
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print(F("COUNTDOWN"));
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+  long dispSec =
+      countdownSettingMode ? countdownTotalSec : countdownRemainingSec;
+  int m = dispSec / 60;
+  int s = dispSec % 60;
+  char buf[8];
+  sprintf(buf, "%02d:%02d", m, s);
+
+  display.setTextSize(2);
+  display.setCursor(34, 25);
+  display.print(buf);
+
+  display.setTextSize(1);
+  display.setCursor(0, 55);
+  if (countdownSettingMode) {
+    display.print(F("X:Switch Y:+- [Click]Go"));
+    // 设定模式下绘制下划线强调高亮选择
+    if (countdownEditField == 0)
+      display.fillRect(34, 41, 22, 2, SSD1306_WHITE); // 分
+    else
+      display.fillRect(70, 41, 22, 2, SSD1306_WHITE); // 秒
+  } else {
+    if (countdownRemainingSec == 0) {
+      display.print(F("TIME UP! [Joy-D] Return"));
+    } else {
+      display.print(countdownRunning ? F("[Click]Paus  [Joy-D]Stop")
+                                     : F("[Click]Run   [Joy-D]Stop"));
+    }
+  }
+}
+
+void handlePomodoro(int vry, int vrx, bool clicked) {
+  if (clicked) {
+    if (pomoState == POMO_PAUSE) {
+      pomoState = pomoPrevState; // 恢复恢复
+      pomoLastTick = millis();
+    } else {
+      pomoPrevState = pomoState; // 备份当前是工作还是休息
+      pomoState = POMO_PAUSE;
+    }
+  }
+
+  // 状态机运行时钟滴答
+  if (pomoState != POMO_PAUSE) {
+    unsigned long now = millis();
+    if (now - pomoLastTick >= 1000) {
+      long passed = (now - pomoLastTick) / 1000;
+      pomoRemainingSec -= passed;
+      pomoLastTick += passed * 1000;
+
+      if (pomoRemainingSec <= 0) {
+        // 状态流转机制
+        if (pomoState == POMO_WORK) {
+          pomoCompletedCycles++;
+          pomoState = POMO_BREAK;
+          pomoRemainingSec = 300; // 短休 5 分钟 = 300秒
+        } else {
+          pomoState = POMO_WORK;
+          pomoRemainingSec = pomoConfigWorkMin * 60; // 重新进入工作
+        }
+        pomoPrevState = pomoState;
+        pomoState = POMO_PAUSE; // 转换周期时强制暂停，提示用户确认切入
+      }
+    }
+  }
+
+  // 渲染
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print(F("POMODORO"));
+
+  display.setCursor(85, 0);
+  if (pomoState == POMO_PAUSE) {
+    display.print(F("[PAUSE]"));
+  } else {
+    display.print(pomoState == POMO_WORK ? F("FOCUSED") : F("BREAK"));
+  }
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+  // 绘制剩余倒计时
+  int m = pomoRemainingSec / 60;
+  int s = pomoRemainingSec % 60;
+  char buf[8];
+  sprintf(buf, "%02d:%02d", m, s);
+  display.setTextSize(2);
+  display.setCursor(34, 20);
+  display.print(buf);
+
+  // 进度条渲染
+  long totalDenom = (pomoState == POMO_BREAK ||
+                     (pomoState == POMO_PAUSE && pomoPrevState == POMO_BREAK))
+                        ? 300
+                        : (pomoConfigWorkMin * 60);
+  int barWidth =
+      map(constrain(pomoRemainingSec, 0, totalDenom), 0, totalDenom, 0, 100);
+  display.drawRect(14, 40, 100, 5, SSD1306_WHITE);
+  display.fillRect(14, 40, barWidth, 5, SSD1306_WHITE);
+
+  // 状态统计
+  display.setTextSize(1);
+  display.setCursor(0, 55);
+  display.print(F("Done:"));
+  display.print(pomoCompletedCycles);
+  display.setCursor(60, 55);
+  display.print(F("[Click] Start/Paus"));
 }
