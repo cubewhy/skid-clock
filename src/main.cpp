@@ -409,7 +409,16 @@ void loop() {
     handleMainMenu(vryVal, vrxVal, isClicked);
     break;
   case STATE_CLOCK:
-    handleClockMode(isClicked);
+    if (isClicked ||
+        (vrxVal < 1000 || vrxVal > 3000 || vryVal < 1000 || vryVal > 3000)) {
+      if (isClicked || (millis() - lastJoyAction > JOY_DELAY)) {
+        if (!isClicked) {
+          lastJoyAction = millis();
+        }
+        currentState = STATE_MAIN_MENU;
+      }
+    }
+    handleClockMode(false);
     break;
   case STATE_CALCULATOR:
     handleCalculatorMode(vryVal, vrxVal, isClicked);
