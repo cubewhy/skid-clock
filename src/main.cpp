@@ -21,7 +21,7 @@
 #define JOY_VRY 14  // 上下控制 (Y轴)
 #define JOY_SW 27   // 摇杆按键
 #define BTN_BACK 15 // 返回/退出物理按键
-#define POT_PIN 34  // 打砖块旋钮电位器引脚
+#define POT_PIN 34  // 打砖块旋钮/宠物摸头电位器引脚
 
 #define GITHUB_URL "github.com/cubewhy"
 #define IDLE_TIMEOUT 180000 // 闲置防烧屏/触发宠物的时间阈值 (3分钟 = 180000ms)
@@ -66,7 +66,7 @@ const char *timerMenuItems[] = {"1. Stopwatch", "2. Countdown", "3. Pomodoro",
 const int TIMERS_TOTAL = 4;
 int currentTimersSelect = 0;
 
-// 游戏二级菜单配置 [已加入海战棋]
+// 游戏二级菜单配置
 const char *gameMenuItems[] = {
     "1. Snake Game",    "2. Gomoku Game", "3. 2048 Game",    "4. Dino Run",
     "5. Brick Breaker", "6. Stack Tower", "7. Naval Battle", "8. < Back"};
@@ -104,8 +104,8 @@ unsigned long pomoLastTick = 0;
 int pomoCompletedCycles = 0;
 int pomoConfigWorkMin = 25; // 可配置工作时长
 
-// --- 桌面宠物(猫咪)模块 ---
-enum PetState { PET_IDLE, PET_WALK, PET_SLEEP };
+// --- 桌面宠物(猫咪)模块 [已加入摸头检测逻辑] ---
+enum PetState { PET_IDLE, PET_WALK, PET_SLEEP, PET_PETTED };
 PetState petState = PET_IDLE;
 int petX = 54;
 int petY = 40;
@@ -114,6 +114,7 @@ unsigned long lastPetStateChange = 0;
 unsigned long lastPetAnimUpdate = 0;
 int petFrame = 0;
 bool petEnteredViaTimeout = false; // 标记是否是通过超时挂机进入的宠物模式
+int lastPetPotVal = 0;             // 存储上一次电位器的绝对阻值
 
 // --- 时钟设置模块 ---
 enum EditField {
@@ -362,7 +363,6 @@ void setup() {
     Rtc.SetDateTime(compiled);
   }
 
-  // 混合电位器输入与时间产生更好的伪随机数种子
   randomSeed(analogRead(POT_PIN) + Rtc.GetDateTime().Second());
   lastActivityTime = millis();
 }
@@ -408,7 +408,8 @@ void loop() {
     }
   }
 
-  if (currentState == STATE_BRICK) {
+  // 扩展变阻器输入过滤：打砖块与宠物模式下均需检测相对改变
+  if (currentState == STATE_BRICK || currentState == STATE_PET) {
     static int lastPotVal = 0;
     int currentPotVal = analogRead(POT_PIN);
     if (abs(currentPotVal - lastPotVal) > 40) {
@@ -429,7 +430,6 @@ void loop() {
     }
   }
 
-  // 返回键状态路由切换 [增加海战棋退出支持]
   if (longPress) {
     currentState = STATE_MAIN_MENU;
   } else if (shortPress) {
@@ -472,8 +472,6 @@ void loop() {
     if (isClicked ||
         (vrxVal < 1000 || vrxVal > 3000 || vryVal < 1000 || vryVal > 3000)) {
       if (isClicked || (millis() - lastJoyAction > JOY_DELAY)) {
-        if (!isClicked) {
-        }
         currentState = STATE_MAIN_MENU;
       }
     }
@@ -537,7 +535,6 @@ void loop() {
 // 7. 模块化业务逻辑实现
 // ==========================================
 
-// --- 主菜单模块 (支持摇杆向左返回，向右选中) ---
 void handleMainMenu(int vry, int vrx, bool clicked) {
   bool selectTriggered = clicked;
 
@@ -645,6 +642,7 @@ void initPet() {
   petFrame = 0;
   lastPetStateChange = millis();
   lastPetAnimUpdate = millis();
+  lastPetPotVal = analogRead(POT_PIN); // 同步进入宠物模式时的电位器初始绝对阻值
 }
 
 void handlePetMode(int vry, int vrx, bool clicked) {
@@ -659,7 +657,23 @@ void handlePetMode(int vry, int vrx, bool clicked) {
 
   unsigned long now = millis();
 
-  if (now - lastPetStateChange > 5000) {
+  // --- 变阻器旋转摸头检测 ---
+  int currentPotVal = analogRead(POT_PIN);
+  if (abs(currentPotVal - lastPetPotVal) >
+      80) { // 滤除底噪扰动，判定发生有效扭动
+    petState = PET_PETTED;
+    lastPetStateChange = now;      // 锁定状态，重置随机切换计时器
+    lastPetPotVal = currentPotVal; // 更新阻值基准
+  }
+
+  // 摸头持续一定周期 (1.5秒) 后恢复常态
+  if (petState == PET_PETTED && (now - lastPetStateChange > 1500)) {
+    petState = PET_IDLE;
+    lastPetStateChange = now;
+  }
+
+  // 常规行为树状态变换（摸头锁定期间阻断随机切换）
+  if (petState != PET_PETTED && (now - lastPetStateChange > 5000)) {
     lastPetStateChange = now;
     int r = random(0, 3);
     if (r == 0) {
@@ -696,7 +710,13 @@ void handlePetMode(int vry, int vrx, bool clicked) {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(2, 2);
-  display.print(F("Cat Life~"));
+
+  // 根据受抚摸状态动态调整提示文本
+  if (petState == PET_PETTED) {
+    display.print(F("So Comfortable~"));
+  } else {
+    display.print(F("Cat Life~"));
+  }
 
   RtcDateTime rtcNow = Rtc.GetDateTime();
   char petTimeStr[9];
@@ -724,6 +744,45 @@ void handlePetMode(int vry, int vrx, bool clicked) {
     } else if (petFrame == 2) {
       display.setCursor(x + 24, y - 5);
       display.print(F("ZzZ"));
+    }
+  } else if (petState == PET_PETTED) {
+    // 渲染享受抚摸姿态：猫咪在原地享受，眼睛变为眯眯眼 (^^)
+    display.fillRoundRect(x + 2, y + 4, 12, 9, 3, SSD1306_WHITE); // 身体
+    int hx = x + 3;                                           // 固定朝向正面
+    display.fillRoundRect(hx, y - 1, 9, 8, 2, SSD1306_WHITE); // 头部
+
+    // 绘制猫耳
+    display.fillTriangle(hx + 1, y - 1, hx + 2, y - 4, hx + 4, y - 1,
+                         SSD1306_BLACK);
+    display.drawTriangle(hx + 1, y - 1, hx + 2, y - 4, hx + 4, y - 1,
+                         SSD1306_WHITE);
+    display.fillTriangle(hx + 5, y - 1, hx + 7, y - 4, hx + 8, y - 1,
+                         SSD1306_BLACK);
+    display.drawTriangle(hx + 5, y - 1, hx + 7, y - 4, hx + 8, y - 1,
+                         SSD1306_WHITE);
+
+    // 绘制眯眯眼线条与胡须点
+    display.drawPixel(hx + 2, y + 2, SSD1306_BLACK);
+    display.drawPixel(hx + 6, y + 2, SSD1306_BLACK);
+    display.drawPixel(hx + 4, y + 4, SSD1306_BLACK);
+
+    // 四肢固定站立
+    display.drawFastVLine(x + 4, y + 13, 3, SSD1306_WHITE);
+    display.drawFastVLine(x + 6, y + 13, 3, SSD1306_WHITE);
+    display.drawFastVLine(x + 10, y + 13, 3, SSD1306_WHITE);
+    display.drawFastVLine(x + 12, y + 13, 3, SSD1306_WHITE);
+
+    // 尾巴做高频快活摆动
+    int tailWiggle = (petFrame % 2 == 0) ? -3 : 0;
+    display.drawLine(x + 14, y + 6, x + 16, y + 2 + tailWiggle, SSD1306_WHITE);
+
+    // 头部上方浮动显示爱心 `<3` 或抚摸线条符号
+    if (petFrame % 2 == 0) {
+      display.setCursor(hx + 1, y - 12);
+      display.print(F("<3"));
+    } else {
+      display.drawFastHLine(hx + 1, y - 9, 6,
+                            SSD1306_WHITE); // 模拟落下的手掌或弧线
     }
   } else {
     display.fillRoundRect(x + 2, y + 4, 12, 9, 3, SSD1306_WHITE);
@@ -778,7 +837,6 @@ void handlePetMode(int vry, int vrx, bool clicked) {
   }
 }
 
-// --- 游戏二级子菜单 (支持摇杆向左返回，向右选中) ---
 void handleGamesMenu(int vry, int vrx, bool clicked) {
   bool selectTriggered = clicked;
 
@@ -1559,7 +1617,6 @@ void handleStackMode(int vry, int vrx, bool clicked) {
                    STACK_BLOCK_HEIGHT - 1, SSD1306_WHITE);
 }
 
-// --- Naval Battle 海战棋游戏模块 ---
 void initNavalGame() {
   navalWinner = 0;
   navalCx = 3;
@@ -1647,7 +1704,6 @@ void handleNavalPlay(int vry, int vrx, bool clicked) {
     return;
   }
 
-  // 操纵玩家准星
   if (millis() - lastJoyAction > JOY_DELAY) {
     if (vry < 1000 && navalCy > 0) {
       navalCy--;
@@ -1665,7 +1721,6 @@ void handleNavalPlay(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 玩家开火逻辑
   if (clicked) {
     uint8_t val = navalBoardEnemy[navalCx][navalCy];
     if (val == 0 || val == 1) {
@@ -1680,7 +1735,6 @@ void handleNavalPlay(int vry, int vrx, bool clicked) {
         return;
       }
 
-      // 玩家开火后，立刻轮到 AI 自动还击
       navalAIMove();
     }
   }
@@ -1693,7 +1747,6 @@ void handleNavalPlay(int vry, int vrx, bool clicked) {
 
   int startY = 14, cellS = 5;
 
-  // 1. 绘制左侧阵地（我方编队）
   int startX1 = 4;
   display.drawRect(startX1 - 1, startY - 1, 8 * cellS + 2, 8 * cellS + 2,
                    SSD1306_WHITE);
@@ -1702,17 +1755,16 @@ void handleNavalPlay(int vry, int vrx, bool clicked) {
       uint8_t val = navalBoardPlayer[x][y];
       int cx = startX1 + x * cellS;
       int cy = startY + y * cellS;
-      if (val == 1) { // 我方战舰本体（空心轮廓）
+      if (val == 1) {
         display.drawRect(cx + 1, cy + 1, cellS - 2, cellS - 2, SSD1306_WHITE);
-      } else if (val == 2) { // 敌方未击中
+      } else if (val == 2) {
         display.drawPixel(cx + 2, cy + 2, SSD1306_WHITE);
-      } else if (val == 3) { // 我方战舰遇袭受损（实心）
+      } else if (val == 3) {
         display.fillRect(cx + 1, cy + 1, cellS - 2, cellS - 2, SSD1306_WHITE);
       }
     }
   }
 
-  // 2. 绘制右侧阵地（敌方雷达迷雾）
   int startX2 = 68;
   display.drawRect(startX2 - 1, startY - 1, 8 * cellS + 2, 8 * cellS + 2,
                    SSD1306_WHITE);
@@ -1721,28 +1773,24 @@ void handleNavalPlay(int vry, int vrx, bool clicked) {
       uint8_t val = navalBoardEnemy[x][y];
       int cx = startX2 + x * cellS;
       int cy = startY + y * cellS;
-      // 注意：不能暴露隐蔽的敌机实体(val == 1)
-      if (val == 2) { // 我方未击中
+      if (val == 2) {
         display.drawPixel(cx + 2, cy + 2, SSD1306_WHITE);
-      } else if (val == 3) { // 成功捕获击中敌舰
+      } else if (val == 3) {
         display.fillRect(cx + 1, cy + 1, cellS - 2, cellS - 2, SSD1306_WHITE);
       }
     }
   }
 
-  // 3. 在雷达图上绘制准星追踪
   int curX = startX2 + navalCx * cellS;
   int curY = startY + navalCy * cellS;
   display.drawRect(curX, curY, cellS, cellS, SSD1306_WHITE);
 
-  // 4. 底部标志文本
   display.setCursor(4, 56);
   display.print(F("MY FLEET"));
   display.setCursor(68, 56);
   display.print(F("EN RADAR"));
 }
 
-// --- 科学表达式解析器基础算法 ---
 double parseAtom(const char *&p) {
   while (*p == ' ')
     p++;
@@ -2110,7 +2158,6 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
     display.fillRect(82, 47, 12, 2, SSD1306_WHITE);
 }
 
-// --- 贪吃蛇游戏模块 ---
 void initSnakeGame() {
   snakeLength = 3;
   snake[0] = {15, 8};
@@ -2206,7 +2253,6 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
                    SNAKE_BLOCK_SIZE, SNAKE_BLOCK_SIZE, SSD1306_WHITE);
 }
 
-// --- 五子棋配置菜单 ---
 void handleGomokuMenu(int vry, int vrx, bool clicked) {
   if (millis() - lastJoyAction > JOY_DELAY) {
     if (vry < 1000) {
@@ -2509,18 +2555,18 @@ void handleTimersMenu(int vry, int vrx, bool clicked) {
 
   if (selectTriggered) {
     switch (currentTimersSelect) {
-    case 0: // 启动正计时
+    case 0:
       stopwatchElapsed = 0;
       stopwatchRunning = false;
       currentState = STATE_STOPWATCH;
       break;
-    case 1: // 启动倒计时配置
+    case 1:
       countdownRunning = false;
       countdownSettingMode = true;
       countdownEditField = 0;
       currentState = STATE_COUNTDOWN;
       break;
-    case 2: // 启动番茄钟
+    case 2:
       pomoState = POMO_PAUSE;
       pomoPrevState = POMO_WORK;
       pomoRemainingSec = pomoConfigWorkMin * 60;
@@ -2556,7 +2602,7 @@ void handleStopwatch(int vry, int vrx, bool clicked) {
       stopwatchLastTime = millis();
   }
 
-  if (millis() - lastJoyAction > JOY_DELAY && vry > 3000) { // 向下重置
+  if (millis() - lastJoyAction > JOY_DELAY && vry > 3000) {
     stopwatchRunning = false;
     stopwatchElapsed = 0;
     lastJoyAction = millis();
@@ -2569,7 +2615,7 @@ void handleStopwatch(int vry, int vrx, bool clicked) {
   }
 
   unsigned long totalSec = stopwatchElapsed / 1000;
-  int ms100 = (stopwatchElapsed % 1000) / 100; // 百毫秒位
+  int ms100 = (stopwatchElapsed % 1000) / 100;
   int sec = totalSec % 60;
   int min = (totalSec / 60) % 60;
   int hour = totalSec / 3600;
