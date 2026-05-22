@@ -51,8 +51,8 @@ enum SystemState {
 SystemState currentState = STATE_CLOCK;
 
 // 主菜单配置
-const char *menuItems[] = {"1. Realtime Clock", "2. Calculator",
-                           "3. Arcade Games",   "4. Time Tools",
+const char *menuItems[] = {"1. Realtime Clock", "2. Time Tools",
+                           "3. Arcade Games",   "4. Calculator",
                            "5. Desktop Pet",    "6. Adjust Settings"};
 const int MENU_TOTAL = 6;
 const int VISIBLE_ITEMS = 3; // 滚动菜单可见行数
@@ -553,10 +553,8 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_CLOCK;
       break;
     case 1:
-      calcInput[0] = '\0';
-      calcResultStr[0] = '\0';
-      calcClearOnNext = false;
-      currentState = STATE_CALCULATOR;
+      currentTimersSelect = 0;
+      currentState = STATE_TIMERS_MENU;
       break;
     case 2:
       currentGamesSelect = 0;
@@ -564,8 +562,10 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_GAMES_MENU;
       break;
     case 3:
-      currentTimersSelect = 0;
-      currentState = STATE_TIMERS_MENU;
+      calcInput[0] = '\0';
+      calcResultStr[0] = '\0';
+      calcClearOnNext = false;
+      currentState = STATE_CALCULATOR;
       break;
     case 4:
       petEnteredViaTimeout = false;
