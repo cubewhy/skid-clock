@@ -1,23 +1,23 @@
-#include "HNReader.h"
+#include "LobstersReader.h"
 #include "Config.h"
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
-#define MAX_HN_ITEMS 10
-static char hnTitles[MAX_HN_ITEMS][64]; // 每条标题裁剪存储 64 字节
-static int hnItemCount = 0;
-static int hnSelectIdx = 0;
-static int hnScrollTop = 0;
-static bool hnFetchLoaded = false;
-static bool hnFetchError = false;
+#define MAX_NEWS_ITEMS 10
+static char newsTitles[MAX_NEWS_ITEMS][64]; // 每条标题裁剪存储 64 字节
+static int newsItemCount = 0;
+static int newsSelectIdx = 0;
+static int newsScrollTop = 0;
+static bool newsFetchLoaded = false;
+static bool newsFetchError = false;
 
-// 极其底层的非阻塞流式字符串查找过滤函数（省内存神器）
+// 极其底层的非阻塞流式字符串查找过滤函数
 static bool fetchHackerNewsRSS() {
   WiFiClientSecure client;
   client.setInsecure(); // 绕过 ESP32 繁琐的证书链验证
   HTTPClient http;
 
-  if (!http.begin(client, "https://news.ycombinator.com/rss"))
+  if (!http.begin(client, "https://lobste.rs/rss"))
     return false;
 
   int httpCode = http.GET();
@@ -28,10 +28,10 @@ static bool fetchHackerNewsRSS() {
 
   // 拿到响应数据流，避免全量 getString() 直接撑爆堆内存
   WiFiClient *stream = http.getStreamPtr();
-  hnItemCount = 0;
+  newsItemCount = 0;
 
   // 简易流式标签匹配状态机
-  while (stream->connected() && hnItemCount < MAX_HN_ITEMS) {
+  while (stream->connected() && newsItemCount < MAX_NEWS_ITEMS) {
     if (stream->find("<item>")) { // 定位到单条新闻载体
       if (stream->find("<title>")) {
         String title = stream->readStringUntil('</title>');
@@ -43,19 +43,19 @@ static bool fetchHackerNewsRSS() {
         title.replace("&lt;", "<");
         title.replace("&gt;", ">");
 
-        strncpy(hnTitles[hnItemCount], title.c_str(), 63);
-        hnTitles[hnItemCount][63] = '\0';
-        hnItemCount++;
+        strncpy(newsTitles[newsItemCount], title.c_str(), 63);
+        newsTitles[newsItemCount][63] = '\0';
+        newsItemCount++;
       }
     } else {
       break; // 找不到了，流结束
     }
   }
   http.end();
-  return (hnItemCount > 0);
+  return (newsItemCount > 0);
 }
 
-void handleHNReader(int vry, int vrx, bool clicked) {
+void handleLobstersReader(int vry, int vrx, bool clicked) {
   // 1. 未连接 WiFi 的防御空跑拦截
   if (WiFi.status() != WL_CONNECTED) {
     if (clicked)
@@ -69,27 +69,27 @@ void handleHNReader(int vry, int vrx, bool clicked) {
   }
 
   // 2. 状态懒加载器触发
-  if (!hnFetchLoaded) {
+  if (!newsFetchLoaded) {
     display.clearDisplay();
     display.setCursor(15, 25);
-    display.print(F("Fetching HN RSS..."));
+    display.print(F("Fetching RSS..."));
     display.display();
 
     if (fetchHackerNewsRSS()) {
-      hnFetchLoaded = true;
-      hnFetchError = false;
+      newsFetchLoaded = true;
+      newsFetchError = false;
     } else {
-      hnFetchLoaded = true;
-      hnFetchError = true;
+      newsFetchLoaded = true;
+      newsFetchError = true;
     }
-    hnSelectIdx = 0;
-    hnScrollTop = 0;
+    newsSelectIdx = 0;
+    newsScrollTop = 0;
     return;
   }
 
-  if (hnFetchError) {
+  if (newsFetchError) {
     if (clicked) {
-      hnFetchLoaded = false;
+      newsFetchLoaded = false;
     } // 点击重试
     display.clearDisplay();
     display.setCursor(10, 20);
@@ -102,10 +102,11 @@ void handleHNReader(int vry, int vrx, bool clicked) {
   // 3. 摇杆控制环路
   if (millis() - lastJoyAction > JOY_DELAY) {
     if (vry < 1000) { // 向上推
-      hnSelectIdx = (hnSelectIdx == 0) ? hnItemCount - 1 : hnSelectIdx - 1;
+      newsSelectIdx =
+          (newsSelectIdx == 0) ? newsItemCount - 1 : newsSelectIdx - 1;
       lastJoyAction = millis();
     } else if (vry > 3000) { // 向下推
-      hnSelectIdx = (hnSelectIdx + 1) % hnItemCount;
+      newsSelectIdx = (newsSelectIdx + 1) % newsItemCount;
       lastJoyAction = millis();
     } else if (vrx < 1000) { // 向左推退出
       currentState = STATE_MAIN_MENU;
@@ -114,31 +115,31 @@ void handleHNReader(int vry, int vrx, bool clicked) {
     }
 
     // 视口平滑滚动算法
-    if (hnSelectIdx < hnScrollTop)
-      hnScrollTop = hnSelectIdx;
-    else if (hnSelectIdx >= hnScrollTop + 3)
-      hnScrollTop = hnSelectIdx - 3 + 1;
+    if (newsSelectIdx < newsScrollTop)
+      newsScrollTop = newsSelectIdx;
+    else if (newsSelectIdx >= newsScrollTop + 3)
+      newsScrollTop = newsSelectIdx - 3 + 1;
   }
 
   // 4. 精确的多行排版渲染
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.print(F("HACKER NEWS"));
+  display.print(F("LOBSTERS"));
   display.setCursor(100, 0);
-  display.print(hnSelectIdx + 1);
+  display.print(newsSelectIdx + 1);
   display.print(F("/"));
-  display.print(hnItemCount);
+  display.print(newsItemCount);
   display.drawFastHLine(0, 9, 128, SSD1306_WHITE);
 
   // 每条 Item 高度占用 18 像素（含行高），提供完美的两行折行排版空间
   for (int i = 0; i < 3; i++) {
-    int itemIdx = hnScrollTop + i;
-    if (itemIdx >= hnItemCount)
+    int itemIdx = newsScrollTop + i;
+    if (itemIdx >= newsItemCount)
       break;
 
     int yPos = 12 + (i * 17);
-    bool isSelected = (itemIdx == hnSelectIdx);
+    bool isSelected = (itemIdx == newsSelectIdx);
 
     if (isSelected) {
       display.fillRect(0, yPos - 1, 128, 16, SSD1306_WHITE);
@@ -149,7 +150,7 @@ void handleHNReader(int vry, int vrx, bool clicked) {
 
     // 手写的高效两行自适应截断安全打印
     display.setCursor(2, yPos);
-    char *titlePtr = hnTitles[itemIdx];
+    char *titlePtr = newsTitles[itemIdx];
     int charLen = strlen(titlePtr);
 
     // 第一行直接打印前 20 个字符

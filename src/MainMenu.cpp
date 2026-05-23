@@ -44,7 +44,7 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_CALCULATOR;
       break;
     case 4:
-      currentState = STATE_HN_READER;
+      currentState = STATE_LOBSTERS_READER;
       break;
     case 5:
       petEnteredViaTimeout = false;

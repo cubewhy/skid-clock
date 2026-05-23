@@ -1,8 +1,8 @@
 #include "Calculator.h"
 #include "Config.h"
 #include "Games.h"
-#include "HNReader.h"
 #include "Keyboard.h"
+#include "LobstersReader.h"
 #include "MainMenu.h"
 #include "Pet.h"
 #include "TimeTools.h"
@@ -119,7 +119,8 @@ void loop() {
              currentState == STATE_CALCULATOR ||
              currentState == STATE_SETTINGS || currentState == STATE_CLOCK ||
              currentState == STATE_TIMERS_MENU ||
-             currentState == STATE_HN_READER || currentState == STATE_WIFI_MENU)
+             currentState == STATE_LOBSTERS_READER ||
+             currentState == STATE_WIFI_MENU)
       currentState = STATE_MAIN_MENU;
     else if (currentState == STATE_MAIN_MENU)
       currentState = STATE_CLOCK;
@@ -147,8 +148,8 @@ void loop() {
   case STATE_CALCULATOR:
     handleCalculatorMode(vryVal, vrxVal, isClicked);
     break;
-  case STATE_HN_READER:
-    handleHNReader(vryVal, vrxVal, isClicked);
+  case STATE_LOBSTERS_READER:
+    handleLobstersReader(vryVal, vrxVal, isClicked);
     break;
   case STATE_GAMES_MENU:
     handleGamesMenu(vryVal, vrxVal, isClicked);
