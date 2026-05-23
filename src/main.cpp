@@ -1,9 +1,11 @@
 #include "Calculator.h"
 #include "Config.h"
 #include "Games.h"
+#include "Keyboard.h"
 #include "MainMenu.h"
 #include "Pet.h"
 #include "TimeTools.h"
+#include "WiFiModule.h"
 
 static int lastBackState = HIGH;
 static unsigned long backBtnDownTime = 0;
@@ -102,6 +104,7 @@ void loop() {
   if (longPress) {
     currentState = STATE_MAIN_MENU;
   } else if (shortPress) {
+
     if (currentState == STATE_GOMOKU_PLAY)
       currentState = STATE_GOMOKU_MENU;
     else if (currentState == STATE_GOMOKU_MENU || currentState == STATE_SNAKE ||
@@ -122,6 +125,11 @@ void loop() {
     else if (currentState == STATE_STOPWATCH ||
              currentState == STATE_COUNTDOWN || currentState == STATE_POMODORO)
       currentState = STATE_TIMERS_MENU;
+    else if (currentState == STATE_WIFI_MENU ||
+             currentState == STATE_WIFI_SCAN ||
+             currentState == STATE_WIFI_KEYBOARD ||
+             currentState == STATE_WIFI_CONNECTING)
+      currentState = STATE_WIFI_MENU;
   }
 
   switch (currentState) {
@@ -183,6 +191,18 @@ void loop() {
     break;
   case STATE_POMODORO:
     handlePomodoro(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_WIFI_MENU:
+    handleWiFiMenu(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_WIFI_SCAN:
+    handleWiFiScan(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_WIFI_KEYBOARD:
+    handleGlobalKeyboard(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_WIFI_CONNECTING:
+    handleWiFiConnectingLoop();
     break;
   }
 

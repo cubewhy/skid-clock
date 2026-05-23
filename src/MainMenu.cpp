@@ -52,6 +52,9 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
       initSettingsMode();
       currentState = STATE_SETTINGS;
       break;
+    case 6:
+      currentState = STATE_WIFI_MENU;
+      break;
     }
     return;
   }
