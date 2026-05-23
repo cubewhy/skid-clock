@@ -86,6 +86,7 @@ void handlePetMode(int vry, int vrx, bool clicked) {
   int x = petX;
   int y = petY;
   if (petState == PET_SLEEP) {
+    display.setTextWrap(false);
     display.fillRoundRect(x, y + 6, 16, 10, 4, SSD1306_WHITE);
     display.drawFastHLine(x + 11, y + 10, 3, SSD1306_BLACK);
     display.fillTriangle(x + 9, y + 6, x + 11, y + 2, x + 13, y + 6,
@@ -102,6 +103,7 @@ void handlePetMode(int vry, int vrx, bool clicked) {
       display.setCursor(x + 24, y - 5);
       display.print(F("ZzZ"));
     }
+    display.setTextWrap(true);
   } else if (petState == PET_PETTED) {
     display.fillRoundRect(x + 2, y + 4, 12, 9, 3, SSD1306_WHITE);
     int hx = x + 3;
