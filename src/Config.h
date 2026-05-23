@@ -10,7 +10,7 @@
 
 // 1. 硬件引脚与物理参数
 #define OLED_SDA 32
-#define OLED_SCL 33
+#define OLED_SCL 25
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 
@@ -18,10 +18,10 @@
 #define RTC_DAT 16
 #define RTC_RST 17
 
-#define JOY_VRX 12
-#define JOY_VRY 14
+#define JOY_VRX 35
+#define JOY_VRY 33
 #define JOY_SW 27
-#define BTN_BACK 15
+#define BTN_BACK 26
 #define POT_PIN 34
 
 #define GITHUB_URL "github.com/cubewhy/skid-clock"
