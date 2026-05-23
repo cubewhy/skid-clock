@@ -1,6 +1,7 @@
 #include "MainMenu.h"
 #include "Config.h"
 #include "Pet.h"
+#include "TimeTools.h"
 
 void handleMainMenu(int vry, int vrx, bool clicked) {
   bool selectTriggered = clicked;
@@ -48,6 +49,7 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_PET;
       break;
     case 5:
+      initSettingsMode();
       currentState = STATE_SETTINGS;
       break;
     }

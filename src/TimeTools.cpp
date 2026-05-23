@@ -34,6 +34,18 @@ static int editYear = 2026, editMonth = 1, editDay = 1;
 static int editHour = 0, editMinute = 0, editSecond = 0;
 static unsigned long lastSettingsTick = 0;
 
+void initSettingsMode() {
+  RtcDateTime nowSettings = Rtc.GetDateTime();
+  editYear = nowSettings.Year();
+  editMonth = nowSettings.Month();
+  editDay = nowSettings.Day();
+  editHour = nowSettings.Hour();
+  editMinute = nowSettings.Minute();
+  editSecond = nowSettings.Second();
+  currentEditField = FIELD_HOUR;
+  lastSettingsTick = millis();
+}
+
 void handleClockMode(bool clicked) {
   if (clicked) {
     currentState = STATE_MAIN_MENU;
@@ -61,6 +73,7 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
   if (nowMs - lastSettingsTick >= 1000) {
     int passedSeconds = (nowMs - lastSettingsTick) / 1000;
     lastSettingsTick += passedSeconds * 1000;
+
     editSecond += passedSeconds;
     if (editSecond >= 60) {
       editMinute += editSecond / 60;
@@ -164,9 +177,11 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
       }
       lastJoyAction = millis();
     }
+
     int maxDaysInCurrentMonth = getMaxDay(editYear, editMonth);
-    if (editDay > maxDaysInCurrentMonth)
+    if (editDay > maxDaysInCurrentMonth) {
       editDay = maxDaysInCurrentMonth;
+    }
   }
 
   if (clicked) {
@@ -182,10 +197,12 @@ void handleSettingsMode(int vry, int vrx, bool clicked) {
   display.setCursor(0, 0);
   display.println(F("[EDIT] X:Move  Y:+-"));
   display.drawFastHLine(0, 12, 128, SSD1306_WHITE);
+
   char dateBuf[22];
   char timeBuf[22];
   sprintf(dateBuf, "DATE: %04d-%02d-%02d", editYear, editMonth, editDay);
   sprintf(timeBuf, "TIME: %02d:%02d:%02d", editHour, editMinute, editSecond);
+
   display.setCursor(10, 22);
   display.print(dateBuf);
   display.setCursor(10, 38);

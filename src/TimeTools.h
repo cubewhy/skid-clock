@@ -2,6 +2,7 @@
 #define TIMETOOLS_H
 
 void handleClockMode(bool clicked);
+void initSettingsMode();
 void handleSettingsMode(int vry, int vrx, bool clicked);
 void handleTimersMenu(int vry, int vrx, bool clicked);
 void handleStopwatch(int vry, int vrx, bool clicked);
