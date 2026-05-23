@@ -207,6 +207,31 @@ void handleWiFiConnectingLoop() {
     display.print(F("IP:"));
     display.setCursor(10, 42);
     display.print(WiFi.localIP());
+
+    static bool ntpExecuted = false;
+    if (!ntpExecuted) {
+      display.setCursor(10, 32);
+      display.print(F("NTP Syncing..."));
+      display.display();
+
+      // 配置时区（以东八区 UTC+8 为默认，采用国内+全球通用授时池）
+      configTime(8 * 3600, 0, "ntp.ntsc.ac.cn", "pool.ntp.org");
+
+      struct tm timeinfo;
+      if (getLocalTime(&timeinfo, 5000)) { // 5秒授时超时
+        RtcDateTime ntpTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
+                            timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min,
+                            timeinfo.tm_sec);
+        Rtc.SetDateTime(ntpTime); // 完美的将精确时间打入 DS1302 硬件
+        display.setCursor(10, 44);
+        display.print(F("RTC Synced OK!"));
+      } else {
+        display.setCursor(10, 44);
+        display.print(F("NTP Timeout!"));
+      }
+      ntpExecuted = true;
+    }
+
     display.setCursor(10, 54);
     display.print(F("[Back] to exit"));
     // 连上之后，依靠用户主动按[返回键]退出该长效看板
