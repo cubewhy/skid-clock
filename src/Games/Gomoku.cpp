@@ -8,7 +8,7 @@ static bool gomokuIsPvE = true;
 static int gomokuDiff = 1;
 static int8_t gomokuTurn = 1;
 static int8_t gomokuWinner = 0;
-int gomokuMenuSelect = 0; // 定义公共导出变量
+int gomokuMenuSelect = 0;
 
 static bool checkGomokuWin(int x, int y, int role) {
   int dx[] = {1, 0, 1, 1};
@@ -139,6 +139,7 @@ void initGomokuGame() {
 
 void handleGomokuMenu(int vry, int vrx, bool clicked) {
   if (millis() - lastJoyAction > JOY_DELAY) {
+    // 纵向 Y 轴：切换选项
     if (vry < 1000) {
       gomokuMenuSelect = (gomokuMenuSelect == 0) ? 2 : gomokuMenuSelect - 1;
       lastJoyAction = millis();
@@ -146,14 +147,39 @@ void handleGomokuMenu(int vry, int vrx, bool clicked) {
       gomokuMenuSelect = (gomokuMenuSelect + 1) % 3;
       lastJoyAction = millis();
     }
-    if (vrx < 1000 || vrx > 3000) {
-      if (gomokuMenuSelect == 0)
+
+    // 横向 X 轴：左右进退及配置切换
+    if (vrx < 1000) { // 向左移动摇杆
+      if (gomokuMenuSelect == 0) {
         gomokuIsPvE = !gomokuIsPvE;
-      if (gomokuMenuSelect == 1 && gomokuIsPvE)
+        lastJoyAction = millis();
+      } else if (gomokuMenuSelect == 1 && gomokuIsPvE) {
         gomokuDiff = (gomokuDiff == 0) ? 1 : 0;
-      lastJoyAction = millis();
+        lastJoyAction = millis();
+      } else if (gomokuMenuSelect == 2) {
+        currentState =
+            STATE_GAMES_MENU; // ✨ 处于 [START GAME] 时向左拨动返回游戏菜单
+        lastJoyAction = millis();
+        return;
+      }
+    } else if (vrx > 3000) { // 向右移动摇杆
+      if (gomokuMenuSelect == 0) {
+        gomokuIsPvE = !gomokuIsPvE;
+        lastJoyAction = millis();
+      } else if (gomokuMenuSelect == 1 && gomokuIsPvE) {
+        gomokuDiff = (gomokuDiff == 0) ? 1 : 0;
+        lastJoyAction = millis();
+      } else if (gomokuMenuSelect == 2) {
+        initGomokuGame();
+        currentState =
+            STATE_GOMOKU_PLAY; // ✨ 处于 [START GAME] 时向右拨动直接启动游戏
+        lastJoyAction = millis();
+        return;
+      }
     }
   }
+
+  // 物理中心键按下同样保持原生兼容
   if (clicked) {
     if (gomokuMenuSelect == 2) {
       initGomokuGame();
@@ -161,6 +187,7 @@ void handleGomokuMenu(int vry, int vrx, bool clicked) {
     }
     return;
   }
+
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
@@ -268,6 +295,4 @@ void handleGomokuPlay(int vry, int vrx, bool clicked) {
   display.print(F("Turn:"));
   display.print(gomokuTurn == 1 ? F("P1[X]")
                                 : (gomokuIsPvE ? F("AI[O]") : F("P2[O]")));
-  display.setCursor(64, 52);
-  display.print(F("Exit->Hold"));
 }
