@@ -44,15 +44,18 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_CALCULATOR;
       break;
     case 4:
+      currentState = STATE_HN_READER;
+      break;
+    case 5:
       petEnteredViaTimeout = false;
       initPet();
       currentState = STATE_PET;
       break;
-    case 5:
+    case 6:
       initSettingsMode();
       currentState = STATE_SETTINGS;
       break;
-    case 6:
+    case 7:
       currentState = STATE_WIFI_MENU;
       break;
     }

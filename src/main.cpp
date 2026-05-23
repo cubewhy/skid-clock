@@ -1,6 +1,7 @@
 #include "Calculator.h"
 #include "Config.h"
 #include "Games.h"
+#include "HNReader.h"
 #include "Keyboard.h"
 #include "MainMenu.h"
 #include "Pet.h"
@@ -116,17 +117,16 @@ void loop() {
       currentState = petEnteredViaTimeout ? STATE_CLOCK : STATE_MAIN_MENU;
     else if (currentState == STATE_GAMES_MENU ||
              currentState == STATE_CALCULATOR ||
-             currentState == STATE_SETTINGS || currentState == STATE_CLOCK)
+             currentState == STATE_SETTINGS || currentState == STATE_CLOCK ||
+             currentState == STATE_TIMERS_MENU ||
+             currentState == STATE_HN_READER || currentState == STATE_WIFI_MENU)
       currentState = STATE_MAIN_MENU;
     else if (currentState == STATE_MAIN_MENU)
       currentState = STATE_CLOCK;
-    else if (currentState == STATE_TIMERS_MENU)
-      currentState = STATE_MAIN_MENU;
     else if (currentState == STATE_STOPWATCH ||
              currentState == STATE_COUNTDOWN || currentState == STATE_POMODORO)
       currentState = STATE_TIMERS_MENU;
-    else if (currentState == STATE_WIFI_MENU ||
-             currentState == STATE_WIFI_SCAN ||
+    else if (currentState == STATE_WIFI_SCAN ||
              currentState == STATE_WIFI_KEYBOARD ||
              currentState == STATE_WIFI_CONNECTING)
       currentState = STATE_WIFI_MENU;
@@ -146,6 +146,9 @@ void loop() {
     break;
   case STATE_CALCULATOR:
     handleCalculatorMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_HN_READER:
+    handleHNReader(vryVal, vrxVal, isClicked);
     break;
   case STATE_GAMES_MENU:
     handleGamesMenu(vryVal, vrxVal, isClicked);
