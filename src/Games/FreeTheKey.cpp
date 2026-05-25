@@ -56,54 +56,50 @@ void initFreeKeyGame() {
   fkMoves = 0;
   fkBlockMovedInSession = false;
 
-  // A. 空间控制：关卡越高，方块越多，留空越少。满图意味着每动一步都需要精妙计算
-  int maxBlocks = constrain(7 + (fkLevel / 2), 8, MAX_FK_BLOCKS);
-
-  // B. 障碍深度：钥匙前方的路径上，必须被多少个独立的垂直长条“截断”
-  int requiredPathBlockers = 1;
-  if (fkLevel >= 3)
-    requiredPathBlockers = 2; // 第3关起，双重铁闸
-  if (fkLevel >= 6)
-    requiredPathBlockers = 3; // 第6关起，三重铁闸（极难）
-
-  // C. 冲刷烈度：大幅提升高级关卡的洗牌深度
-  int shuffleSteps = 100 + fkLevel * 50;
+  // 基础难度配置
+  int baseTargetBlocks = constrain(8 + (fkLevel / 2), 9, 13);
+  int reqBlockers = (fkLevel >= 3) ? 2 : 1;
 
   bool isMapValid = false;
   int safetyAttempts = 0;
 
-  // 验证循环：不生成出高难度合格的地图决不罢休
-  while (!isMapValid && safetyAttempts < 300) {
+  while (!isMapValid) {
     safetyAttempts++;
     fkBlockCount = 0;
 
-    // 1. 放置目标获胜态的钥匙（1x3横向，位于最右侧出口边缘占满 X=3,4,5）
+    // 1. 动态自适应降额：如果尝试了 80 次都无法生成超硬核关卡，
+    // 说明当前随机种子下的空间太挤。我们开始动态调小目标方块数，确保算法绝对收敛。
+    int currentTargetBlocks = baseTargetBlocks;
+    if (safetyAttempts > 80)
+      currentTargetBlocks = baseTargetBlocks - 1;
+    if (safetyAttempts > 160)
+      currentTargetBlocks = baseTargetBlocks - 2;
+    if (safetyAttempts > 220) {
+      currentTargetBlocks = 8; // 保底方块数
+      reqBlockers = 1;         // 放宽铁闸限制
+    }
+
+    // 限制边界防止数组溢出
+    if (currentTargetBlocks > MAX_FK_BLOCKS)
+      currentTargetBlocks = MAX_FK_BLOCKS;
+
+    // 2. 放置目标获胜态的钥匙（完美占领 Row 2 的 Col 3,4,5）
     fkBlocks[0] = {3, 2, 3, 1, true, true};
     fkBlockCount = 1;
 
-    // 2. 在出口左侧的上/下方战略性预埋 vertical 种子方块
-    // 当钥匙在洗牌中后退时，这些种子方块会如同机关一样“扎入”Row 2 形成锁死结构
-    fkBlocks[fkBlockCount++] = {3, 0, 1, 2, false, true}; // 挂在列3上方的1x2
-    fkBlocks[fkBlockCount++] = {4, 3, 1, 3, false, true}; // 站在列4下方的1x3
-    if (maxBlocks > 9) {
-      fkBlocks[fkBlockCount++] = {5, 0, 1, 2, false, true}; // 挂在列5上方的1x2
-    }
-
-    // 3. 动态填充干扰块：关卡越高，生成垂直块（纵向移动）的权重越恐怖
-    int verticalWeight = constrain(35 + fkLevel * 6, 35, 80);
-
+    // 3. 动态填充：采用 50/50 的严格横纵比随机放置初始方块
+    // 注意：这里没有任何硬编码重叠块，所有方块出生即合法
     for (int i = 0; i < 40; i++) {
-      if (fkBlockCount >= maxBlocks)
+      if (fkBlockCount >= currentTargetBlocks)
         break;
 
-      bool makeVertical = (random(0, 100) < verticalWeight);
+      bool makeVertical = (random(0, 100) < 50);
       int8_t bw = 1, bh = 1;
-
       if (makeVertical) {
-        bh = random(2, 4); // 随机生成 1x2 或 1x3 垂直长条
+        bh = random(2, 4);
         bw = 1;
       } else {
-        bw = random(2, 4); // 随机生成 2x1 或 3x1 水平长条
+        bw = random(2, 4);
         bh = 1;
       }
 
@@ -116,11 +112,24 @@ void initFreeKeyGame() {
       }
     }
 
-    // 4. 高强度反向解谜冲刷
-    for (int s = 0; s < shuffleSteps; s++) {
+    int shuffleSteps = 120 + fkLevel * 30;
+    int effectiveMoves = 0;
+    int8_t lastBIdx = -1;
+    int8_t lastDir = 0;
+    int stallCounter = 0;
+
+    while (effectiveMoves < shuffleSteps && stallCounter < 400) {
+      stallCounter++;
       int bIdx = random(0, fkBlockCount);
       int dir = (random(0, 2) == 0) ? -1 : 1;
+
+      // 防止原地踏步的浅层震荡
+      if (bIdx == lastBIdx && dir == -lastDir)
+        dir = -dir;
+
       FKBlock &b = fkBlocks[bIdx];
+      int8_t oldX = b.x;
+      int8_t oldY = b.y;
 
       if (b.w > b.h) {
         int8_t nx = b.x + dir;
@@ -133,41 +142,55 @@ void initFreeKeyGame() {
             canPlaceBlock(b.x, ny, b.w, b.h, bIdx))
           b.y = ny;
       }
+
+      // 只有坐标真的发生改变，才算一次有效洗牌步数
+      if (b.x != oldX || b.y != oldY) {
+        effectiveMoves++;
+        stallCounter = 0; // 重置空转计数器
+        lastBIdx = bIdx;
+        lastDir = dir;
+      }
     }
 
-    int pathBlockerCount = 0;
-    int8_t keyFrontX = fkBlocks[0].x + fkBlocks[0].w;
+    int verticalBlockers = 0;
+    int interlockingPairs = 0;
+    int8_t kx = fkBlocks[0].x;
 
-    // 从当前洗开后的钥匙前端，一直向右扫描到出口边际
-    for (int8_t tx = keyFrontX; tx < GRID_SIZE; tx++) {
-      // 检查当前列的 Row 2 是否有垂直方块穿过
-      for (int i = 1; i < fkBlockCount; i++) {
-        FKBlock &b = fkBlocks[i];
-        if (tx >= b.x && tx < b.x + b.w && 2 >= b.y && 2 < b.y + b.h) {
-          if (b.h >
-              b.w) { // 必须是垂直长条卡在路中央（横向块不算，因为会被钥匙直接推走）
-            pathBlockerCount++;
-            break;
+    // A. 审查通路铁闸：扫描钥匙右侧，看有多少根纵向块切断了 Row 2
+    for (int i = 1; i < fkBlockCount; i++) {
+      FKBlock &b = fkBlocks[i];
+      if (b.h > b.w && b.x >= kx + 3) { // 处在钥匙右侧的纵向块
+        if (2 >= b.y && 2 < b.y + b.h) {
+          verticalBlockers++;
+
+          // B. 审查死锁：这根铁闸的上下两端，是否有横向块顶住它的退路？
+          for (int j = 1; j < fkBlockCount; j++) {
+            FKBlock &h = fkBlocks[j];
+            if (h.w > h.h) { // 横向块
+              if (h.x < b.x + b.w && h.x + h.w > b.x) {
+                if (h.y == b.y + b.h || h.y + h.h == b.y) {
+                  interlockingPairs++; // 产生交叉死锁链
+                }
+              }
+            }
           }
         }
       }
     }
 
-    // 严苛通过断言：
-    // 1. 阻挡钥匙的垂直长闸数量必须达标
-    // 2. 钥匙自身必须被逼退到足够靠左的位置（增加了底层解密所需的总步长）
-    if (pathBlockerCount >= requiredPathBlockers &&
-        fkBlocks[0].x <= (4 - requiredPathBlockers)) {
+    // C. 综合硬核验证断言：
+    // - 钥匙必须被成功逼退到最左侧深处（kx <= 1），拉长解密步长
+    // - 钥匙前方的纵向铁闸数必须达标
+    // - 全图至少要存在 2 组以上的纵横卡死对（Level 3+ 要求 3 组）
+    int reqInterlocks = (fkLevel >= 3) ? 3 : 2;
+
+    if (kx <= 1 && verticalBlockers >= reqBlockers &&
+        interlockingPairs >= reqInterlocks) {
       isMapValid = true;
     }
   }
 
-  // 极度安全的降级保护：万一在超高难度下随机死循环，保底将钥匙推回最左侧起步
-  if (!isMapValid) {
-    fkBlocks[0].x = 0;
-  }
-
-  // 准星聚焦钥匙
+  // 准星初始归位聚焦钥匙
   fkCursorX = fkBlocks[0].x;
   fkCursorY = fkBlocks[0].y;
 }
@@ -280,7 +303,6 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
   display.print(F("Lvl: "));
   display.print(fkLevel);
 
-  // 👈 新增：步数实时显示
   display.setCursor(66, 29);
   display.print(F("Step:"));
   display.print(fkMoves);
