@@ -54,4 +54,7 @@ void handleRacing3DMode(int vry, int vrx, bool clicked);
 void initRunner3D();
 void handleRunner3DMode(int vry, int vrx, bool clicked);
 
+void initTankTroubleGame();
+void handleTankTroubleMode(int vry, int vrx, bool clicked);
+
 #endif
