@@ -23,6 +23,8 @@ static int fkMoves = 0;
 // 当前选择会话中方块是否真的发生过位移
 static bool fkBlockMovedInSession = false;
 
+static bool fkJoyCenteredAfterWin = false;
+
 // 检查绝对网格单元是否被占用
 static bool isCellOccupied(int8_t x, int8_t y, int8_t excludeIdx) {
   if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE)
@@ -55,6 +57,7 @@ void initFreeKeyGame() {
   fkSelectedIdx = -1;
   fkMoves = 0;
   fkBlockMovedInSession = false;
+  fkJoyCenteredAfterWin = false;
 
   // 基础难度配置
   int baseTargetBlocks = constrain(8 + (fkLevel / 2), 9, 13);
@@ -74,11 +77,10 @@ void initFreeKeyGame() {
     if (safetyAttempts > 160)
       currentTargetBlocks = baseTargetBlocks - 2;
     if (safetyAttempts > 220) {
-      currentTargetBlocks = 8; // 保底方块数
-      reqBlockers = 1;         // 放宽铁闸限制
+      currentTargetBlocks = 8;
+      reqBlockers = 1;
     }
 
-    // 限制边界防止数组溢出
     if (currentTargetBlocks > MAX_FK_BLOCKS)
       currentTargetBlocks = MAX_FK_BLOCKS;
 
@@ -184,26 +186,42 @@ void initFreeKeyGame() {
 }
 
 void handleFreeKeyMode(int vry, int vrx, bool clicked) {
-  // 👈 核心重构点：处理胜利通关结算状态
   if (fkLevelComplete) {
-    // 检测中键按下，或者检测防误触延迟（JOY_DELAY）后的任意摇杆偏转
-    bool proceedNext =
-        clicked || (millis() - lastJoyAction > JOY_DELAY &&
-                    (vrx < 1000 || vrx > 3000 || vry < 1000 || vry > 3000));
+    // 实时读取判断摇杆当前是否处于物理中心安全区 (1000 ~ 3000)
+    bool isCentered =
+        (vrx >= 1000 && vrx <= 3000 && vry >= 1000 && vry <= 3000);
 
-    if (proceedNext) {
-      fkLevel++;
-      initFreeKeyGame();
-      lastJoyAction = millis(); // 锁定动作时间戳，防止长按直接连跳数关
+    if (isCentered) {
+      fkJoyCenteredAfterWin = true; // 只要松开过一次，立刻永久解锁当前结算状态
     }
 
+    // 只有在摇杆释放解锁后，再次拨动摇杆（!isCentered）或点击中键，才会切入下一关
+    if (fkJoyCenteredAfterWin) {
+      bool proceedNext =
+          clicked || (!isCentered && (millis() - lastJoyAction > JOY_DELAY));
+      if (proceedNext) {
+        fkLevel++;
+        initFreeKeyGame();
+        lastJoyAction = millis();
+        return;
+      }
+    }
+
+    // 动态 UI 显示
     display.clearDisplay();
     display.setTextSize(2);
-    display.setCursor(12, 15);
+    display.setCursor(12, 12);
     display.println(F("ESCAPE OK"));
     display.setTextSize(1);
-    display.setCursor(12, 42);
-    display.print(F("[Joy/Click] Next Lvl")); // 提示文案同步更新
+    display.setCursor(12, 40);
+
+    if (!fkJoyCenteredAfterWin) {
+      // 摇杆还按着呢，死锁并提示释放
+      display.print(F("[Release Joystick]"));
+    } else {
+      // 已经释放过，进入标准就绪态
+      display.print(F("[Joy/Click] Next Lvl"));
+    }
     return;
   }
 
@@ -222,11 +240,9 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
       lastJoyAction = millis();
 
       if (fkSelectedIdx == -1) {
-        // 模式 1：移动准星光标
         fkCursorX = constrain(fkCursorX + dx, 0, GRID_SIZE - 1);
         fkCursorY = constrain(fkCursorY + dy, 0, GRID_SIZE - 1);
       } else {
-        // 模式 2：移动锁定的方块
         FKBlock &b = fkBlocks[fkSelectedIdx];
         int8_t oldX = b.x;
         int8_t oldY = b.y;
@@ -234,12 +250,11 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
         if (b.w > b.h) {
           if (dx != 0) {
             int8_t nx = b.x + dx;
-            if (b.isKey && nx == 4) { // 钥匙成功突围
+            if (b.isKey && nx == 4) { // 钥匙突围成功
               b.x = nx;
               fkMoves++;
               fkLevelComplete = true;
-              lastJoyAction =
-                  millis(); // 👈 钥匙冲出瞬间记录时间，卡住防连刷延时
+              lastJoyAction = millis();
               return;
             }
             if (nx >= 0 && nx + b.w <= GRID_SIZE &&
