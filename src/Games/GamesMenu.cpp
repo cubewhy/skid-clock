@@ -4,7 +4,7 @@
 static const char *gameMenuItems[] = {
     "1. Snake Game",    "2. Gomoku Game", "3. 2048 Game",    "4. Dino Run",
     "5. Brick Breaker", "6. Stack Tower", "7. Naval Battle", "8. Gold Miner",
-    "9. Free The Key",  "10. Pac-Man",    "11. Air Combat",  "12. Tetris Game",
+    "9. Free The Key",  "10. Pac-Man",    "11. Air Combat",  "12. Tetris",
     "13. Target Range", "14. 3D Racing",  "15. 3D Runner",   "16. Tank Trouble",
     "17. < Back"};
 static const int GAMES_TOTAL = 17;
