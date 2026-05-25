@@ -115,7 +115,9 @@ void loop() {
              currentState == STATE_GOLDMINER ||
              currentState == STATE_FREE_THE_KEY ||
              currentState == STATE_PACMAN || currentState == STATE_SHOOTER ||
-             currentState == STATE_TARGET_RANGE || currentState == STATE_TETRIS)
+             currentState == STATE_TARGET_RANGE ||
+             currentState == STATE_TETRIS || currentState == STATE_3D_RACING ||
+             currentState == STATE_3D_RUNNER)
       currentState = STATE_GAMES_MENU;
     else if (currentState == STATE_PET)
       currentState = petEnteredViaTimeout ? STATE_CLOCK : STATE_MAIN_MENU;
@@ -202,6 +204,12 @@ void loop() {
     break;
   case STATE_TARGET_RANGE:
     handleTargetMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_3D_RACING:
+    handleRacing3DMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_3D_RUNNER:
+    handleRunner3DMode(vryVal, vrxVal, isClicked);
     break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);

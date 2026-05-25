@@ -48,4 +48,10 @@ void handleTetrisMode(int vry, int vrx, bool clicked);
 void initTargetGame();
 void handleTargetMode(int vry, int vrx, bool clicked);
 
+void initRacing3D();
+void handleRacing3DMode(int vry, int vrx, bool clicked);
+
+void initRunner3D();
+void handleRunner3DMode(int vry, int vrx, bool clicked);
+
 #endif
