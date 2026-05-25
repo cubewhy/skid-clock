@@ -20,8 +20,8 @@ static bool fkLevelComplete = false;
 static int fkLevel = 1;
 
 static int fkMoves = 0;
-static bool fkBlockMovedInSession =
-    false; // 当前选择会话中方块是否真的发生过位移
+// 当前选择会话中方块是否真的发生过位移
+static bool fkBlockMovedInSession = false;
 
 // 检查绝对网格单元是否被占用
 static bool isCellOccupied(int8_t x, int8_t y, int8_t excludeIdx) {
@@ -67,8 +67,7 @@ void initFreeKeyGame() {
     safetyAttempts++;
     fkBlockCount = 0;
 
-    // 1. 动态自适应降额：如果尝试了 80 次都无法生成超硬核关卡，
-    // 说明当前随机种子下的空间太挤。我们开始动态调小目标方块数，确保算法绝对收敛。
+    // 1. 动态自适应降额
     int currentTargetBlocks = baseTargetBlocks;
     if (safetyAttempts > 80)
       currentTargetBlocks = baseTargetBlocks - 1;
@@ -83,12 +82,11 @@ void initFreeKeyGame() {
     if (currentTargetBlocks > MAX_FK_BLOCKS)
       currentTargetBlocks = MAX_FK_BLOCKS;
 
-    // 2. 放置目标获胜态的钥匙（完美占领 Row 2 的 Col 3,4,5）
+    // 2. 放置目标获胜态的钥匙
     fkBlocks[0] = {3, 2, 3, 1, true, true};
     fkBlockCount = 1;
 
-    // 3. 动态填充：采用 50/50 的严格横纵比随机放置初始方块
-    // 注意：这里没有任何硬编码重叠块，所有方块出生即合法
+    // 3. 动态填充
     for (int i = 0; i < 40; i++) {
       if (fkBlockCount >= currentTargetBlocks)
         break;
@@ -123,7 +121,6 @@ void initFreeKeyGame() {
       int bIdx = random(0, fkBlockCount);
       int dir = (random(0, 2) == 0) ? -1 : 1;
 
-      // 防止原地踏步的浅层震荡
       if (bIdx == lastBIdx && dir == -lastDir)
         dir = -dir;
 
@@ -143,10 +140,9 @@ void initFreeKeyGame() {
           b.y = ny;
       }
 
-      // 只有坐标真的发生改变，才算一次有效洗牌步数
       if (b.x != oldX || b.y != oldY) {
         effectiveMoves++;
-        stallCounter = 0; // 重置空转计数器
+        stallCounter = 0;
         lastBIdx = bIdx;
         lastDir = dir;
       }
@@ -156,20 +152,18 @@ void initFreeKeyGame() {
     int interlockingPairs = 0;
     int8_t kx = fkBlocks[0].x;
 
-    // A. 审查通路铁闸：扫描钥匙右侧，看有多少根纵向块切断了 Row 2
     for (int i = 1; i < fkBlockCount; i++) {
       FKBlock &b = fkBlocks[i];
-      if (b.h > b.w && b.x >= kx + 3) { // 处在钥匙右侧的纵向块
+      if (b.h > b.w && b.x >= kx + 3) {
         if (2 >= b.y && 2 < b.y + b.h) {
           verticalBlockers++;
 
-          // B. 审查死锁：这根铁闸的上下两端，是否有横向块顶住它的退路？
           for (int j = 1; j < fkBlockCount; j++) {
             FKBlock &h = fkBlocks[j];
-            if (h.w > h.h) { // 横向块
+            if (h.w > h.h) {
               if (h.x < b.x + b.w && h.x + h.w > b.x) {
                 if (h.y == b.y + b.h || h.y + h.h == b.y) {
-                  interlockingPairs++; // 产生交叉死锁链
+                  interlockingPairs++;
                 }
               }
             }
@@ -178,36 +172,38 @@ void initFreeKeyGame() {
       }
     }
 
-    // C. 综合硬核验证断言：
-    // - 钥匙必须被成功逼退到最左侧深处（kx <= 1），拉长解密步长
-    // - 钥匙前方的纵向铁闸数必须达标
-    // - 全图至少要存在 2 组以上的纵横卡死对（Level 3+ 要求 3 组）
     int reqInterlocks = (fkLevel >= 3) ? 3 : 2;
-
     if (kx <= 1 && verticalBlockers >= reqBlockers &&
         interlockingPairs >= reqInterlocks) {
       isMapValid = true;
     }
   }
 
-  // 准星初始归位聚焦钥匙
   fkCursorX = fkBlocks[0].x;
   fkCursorY = fkBlocks[0].y;
 }
 
 void handleFreeKeyMode(int vry, int vrx, bool clicked) {
+  // 👈 核心重构点：处理胜利通关结算状态
   if (fkLevelComplete) {
-    if (clicked) {
+    // 检测中键按下，或者检测防误触延迟（JOY_DELAY）后的任意摇杆偏转
+    bool proceedNext =
+        clicked || (millis() - lastJoyAction > JOY_DELAY &&
+                    (vrx < 1000 || vrx > 3000 || vry < 1000 || vry > 3000));
+
+    if (proceedNext) {
       fkLevel++;
       initFreeKeyGame();
+      lastJoyAction = millis(); // 锁定动作时间戳，防止长按直接连跳数关
     }
+
     display.clearDisplay();
     display.setTextSize(2);
     display.setCursor(12, 15);
     display.println(F("ESCAPE OK"));
     display.setTextSize(1);
     display.setCursor(12, 42);
-    display.print(F("[Click] Next Level"));
+    display.print(F("[Joy/Click] Next Lvl")); // 提示文案同步更新
     return;
   }
 
@@ -240,8 +236,10 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
             int8_t nx = b.x + dx;
             if (b.isKey && nx == 4) { // 钥匙成功突围
               b.x = nx;
-              fkMoves++; // 突围的最后一步自动计入
+              fkMoves++;
               fkLevelComplete = true;
+              lastJoyAction =
+                  millis(); // 👈 钥匙冲出瞬间记录时间，卡住防连刷延时
               return;
             }
             if (nx >= 0 && nx + b.w <= GRID_SIZE &&
@@ -261,7 +259,6 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
           }
         }
 
-        // 👈 如果位置真的变了，标记这轮选择是有合法位移的
         if (b.x != oldX || b.y != oldY) {
           fkBlockMovedInSession = true;
         }
@@ -271,18 +268,16 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
 
   if (clicked) {
     if (fkSelectedIdx == -1) {
-      // 尝试抓取方块
       for (int i = 0; i < fkBlockCount; i++) {
         FKBlock &b = fkBlocks[i];
         if (fkCursorX >= b.x && fkCursorX < b.x + b.w && fkCursorY >= b.y &&
             fkCursorY < b.y + b.h) {
           fkSelectedIdx = i;
-          fkBlockMovedInSession = false; // 👈 抓取时重置移动标记
+          fkBlockMovedInSession = false;
           break;
         }
       }
     } else {
-      // 👈 松开方块：只有当抓取期间对方块做过实际位移，才算一次有效操作
       if (fkBlockMovedInSession) {
         fkMoves++;
       }
@@ -292,7 +287,6 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
 
   display.clearDisplay();
 
-  // 右侧留白控制面板信息渲染
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(66, 4);
@@ -310,7 +304,6 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
   display.setCursor(66, 45);
   display.print(fkSelectedIdx >= 0 ? F("[MOVING]") : F("[SELECT]"));
 
-  // 华容道地图主骨架绘制
   int startX = 4, startY = 5;
   int bSize = GRID_SIZE * CELL_SIZE;
 
@@ -318,7 +311,6 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
   display.drawFastHLine(startX - 1, startY + bSize, bSize + 2, SSD1306_WHITE);
   display.drawFastVLine(startX - 1, startY - 1, bSize + 2, SSD1306_WHITE);
 
-  // 右边框第 2 行留出开放缺口
   display.drawFastVLine(startX + bSize, startY - 1, 2 * CELL_SIZE + 1,
                         SSD1306_WHITE);
   display.drawFastVLine(startX + bSize, startY + 3 * CELL_SIZE,
@@ -327,7 +319,6 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
   display.setCursor(startX + bSize + 2, startY + 2 * CELL_SIZE + 1);
   display.print(F(">"));
 
-  // 渲染所有方块
   for (int i = 0; i < fkBlockCount; i++) {
     FKBlock &b = fkBlocks[i];
     int bx = startX + b.x * CELL_SIZE + 1;
@@ -339,13 +330,9 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
       continue;
 
     if (b.isKey) {
-      // 🔑【修改点：钥匙块标志性重构】
-      // 采用大反白高亮打底，并在正中心写入反色黑字 "KEY"！辨识度瞬间拉满
       display.fillRect(bx, by, bw, bh, SSD1306_WHITE);
       display.setTextColor(SSD1306_BLACK);
       display.setTextSize(1);
-      // 居中打印简易 Key 文本标示 (1x3 块有 26 像素宽，字体占 17
-      // 像素宽，左右留白 4 像素)
       display.setCursor(bx + 4, by + 1);
       display.print(F("KEY"));
     } else {
@@ -364,10 +351,8 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 恢复出厂白色画图环境
   display.setTextColor(SSD1306_WHITE);
 
-  // 渲染准星框
   if (fkSelectedIdx == -1) {
     int cx = startX + fkCursorX * CELL_SIZE;
     int cy = startY + fkCursorY * CELL_SIZE;
