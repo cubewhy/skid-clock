@@ -6,7 +6,7 @@ static const char *gameMenuItems[] = {
     "4. Dino Run",     "5. Brick Breaker", "6. Stack Tower",
     "7. Naval Battle", "8. Gold Miner",    "9. < Back"};
 static const int GAMES_TOTAL = 9;
-static const int VISIBLE_GAMES_ITEMS = 3;
+static const int VISIBLE_GAMES_ITEMS = 4;
 static int currentGamesSelect = 0;
 static int gamesScrollTop = 0;
 
@@ -99,7 +99,4 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
   int thumbY = barY + ((barHeight - thumbHeight) * currentGamesSelect /
                        (GAMES_TOTAL - 1));
   display.fillRect(barX, thumbY, 3, thumbHeight, SSD1306_WHITE);
-  display.drawFastHLine(0, 51, 128, SSD1306_WHITE);
-  display.setCursor(2, 55);
-  display.print(F("Back to Menu -> [Back]"));
 }

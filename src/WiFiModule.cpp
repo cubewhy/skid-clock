@@ -8,7 +8,7 @@ static const char *wifiMenuItems[] = {"1. Scan Networks", "2. Add Hidden WiFi",
                                       "3. Disconnect WiFi",
                                       "4. Manual NTP Sync", "5. < Back"};
 static const int WIFI_TOTAL = 5;
-static const int VISIBLE_WIFI_ITEMS = 3;
+static const int VISIBLE_WIFI_ITEMS = 4;
 static int currentWiFiSelect = 0;
 static int wifiScrollTop = 0;
 
@@ -153,9 +153,6 @@ void handleWiFiMenu(int vry, int vrx, bool clicked) {
   int thumbY =
       barY + ((barHeight - thumbHeight) * currentWiFiSelect / (WIFI_TOTAL - 1));
   display.fillRect(barX, thumbY, 3, thumbHeight, SSD1306_WHITE);
-  display.drawFastHLine(0, 51, 128, SSD1306_WHITE);
-  display.setCursor(2, 55);
-  display.print(F("Back to Menu -> [Back]"));
 }
 
 void handleWiFiScan(int vry, int vrx, bool clicked) {
