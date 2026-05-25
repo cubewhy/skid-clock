@@ -73,7 +73,14 @@ enum EditField {
   FIELD_MINUTE,
   FIELD_SECOND
 };
-enum PetState { PET_IDLE, PET_WALK, PET_SLEEP, PET_PETTED };
+enum PetState {
+  PET_IDLE,
+  PET_WALK,
+  PET_SLEEP,
+  PET_PETTED,
+  PET_GRABBED,
+  PET_FALLING
+};
 enum SnakeDirection { SNAKE_UP, SNAKE_DOWN, SNAKE_LEFT, SNAKE_RIGHT };
 
 // 3. 数据结构
