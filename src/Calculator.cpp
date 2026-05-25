@@ -134,20 +134,35 @@ void handleCalculatorMode(int vry, int vrx, bool clicked) {
       if (strlen(calcInput) > 0) {
         const char *p = calcInput;
         double res = parseExpression(p);
-        if (isnan(res)) {
+
+        // 增加 isinf(res) 拦截，防止如 9^999 导致无限大崩溃
+        if (isnan(res) || isinf(res)) {
           strcpy(calcResultStr, "= Error");
         } else {
-          if (res == (long)res) {
-            sprintf(calcResultStr, "= %ld", (long)res);
+          // 1. 安全边界检查：只有在 long
+          // 有效范围内才允许转整型，防止大数引发未定义行为
+          if (res >= -2147483648.0 && res <= 2147483647.0 && res == (long)res) {
+            snprintf(calcResultStr, sizeof(calcResultStr), "= %ld", (long)res);
           } else {
-            char temp[20];
-            dtostrf(res, 12, 4, temp);
-            int rLen = strlen(temp);
-            while (rLen > 0 && (temp[rLen - 1] == ' ' || temp[rLen - 1] == '0'))
-              temp[--rLen] = '\0';
-            if (rLen > 0 && temp[rLen - 1] == '.')
-              temp[--rLen] = '\0';
-            sprintf(calcResultStr, "= %s", temp);
+            // 2. 科学计数法分流：针对超大数（如
+            // 2^125）或极小数，用科学计数法输出 占用约 13 个字符（如
+            // "= 4.2535e+37"），完美适配 calcResultStr[24]
+            if (abs(res) >= 1e10 || (abs(res) < 1e-4 && res != 0)) {
+              snprintf(calcResultStr, sizeof(calcResultStr), "= %.4e", res);
+            } else {
+              // 3. 普通浮点数：将临时缓冲区 temp 扩大至 32 字节，并配合
+              // snprintf 限制长度
+              char temp[32];
+              dtostrf(res, 12, 4, temp);
+              int rLen = strlen(temp);
+              while (rLen > 0 &&
+                     (temp[rLen - 1] == ' ' || temp[rLen - 1] == '0'))
+                temp[--rLen] = '\0';
+              if (rLen > 0 && temp[rLen - 1] == '.')
+                temp[--rLen] = '\0';
+
+              snprintf(calcResultStr, sizeof(calcResultStr), "= %s", temp);
+            }
           }
         }
         calcClearOnNext = true;
