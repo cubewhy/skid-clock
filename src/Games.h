@@ -45,4 +45,7 @@ void handleShooterMode(int vry, int vrx, bool clicked);
 void initTetrisGame();
 void handleTetrisMode(int vry, int vrx, bool clicked);
 
+void initTargetGame();
+void handleTargetMode(int vry, int vrx, bool clicked);
+
 #endif

@@ -115,7 +115,7 @@ void loop() {
              currentState == STATE_GOLDMINER ||
              currentState == STATE_FREE_THE_KEY ||
              currentState == STATE_PACMAN || currentState == STATE_SHOOTER ||
-             currentState == STATE_TETRIS)
+             currentState == STATE_TARGET_RANGE || currentState == STATE_TETRIS)
       currentState = STATE_GAMES_MENU;
     else if (currentState == STATE_PET)
       currentState = petEnteredViaTimeout ? STATE_CLOCK : STATE_MAIN_MENU;
@@ -199,6 +199,9 @@ void loop() {
     break;
   case STATE_TETRIS:
     handleTetrisMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_TARGET_RANGE:
+    handleTargetMode(vryVal, vrxVal, isClicked);
     break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);

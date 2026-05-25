@@ -57,6 +57,7 @@ enum SystemState {
   STATE_PACMAN,
   STATE_SHOOTER,
   STATE_TETRIS,
+  STATE_TARGET_RANGE,
 };
 
 enum PomoState { POMO_WORK, POMO_BREAK, POMO_PAUSE };
