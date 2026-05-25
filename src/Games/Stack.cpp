@@ -70,8 +70,15 @@ void handleStackMode(int vry, int vrx, bool clicked) {
     lastStackTick = millis();
     if (!stackIsFalling) {
       stackBlockX += stackBlockSpeedX;
-      if (stackBlockX <= 0 || stackBlockX + stackBlockWidth >= SCREEN_WIDTH)
-        stackBlockSpeedX = -stackBlockSpeedX;
+
+      if (stackBlockX <= 0 && stackBlockSpeedX < 0) {
+        stackBlockX = 0;                      // 强行修正坐标到边界内
+        stackBlockSpeedX = -stackBlockSpeedX; // 反转速度
+      } else if (stackBlockX + stackBlockWidth >= SCREEN_WIDTH &&
+                 stackBlockSpeedX > 0) {
+        stackBlockX = SCREEN_WIDTH - stackBlockWidth; // 强行贴紧右侧边界
+        stackBlockSpeedX = -stackBlockSpeedX;         // 反转速度
+      }
     } else {
       stackBlockY += 3.5f;
       int targetTopY =
