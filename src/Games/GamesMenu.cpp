@@ -127,7 +127,7 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
       display.print(F("  "));
     display.println(gameMenuItems[itemIdx]);
   }
-  int barX = 124, barY = 14, barHeight = 34;
+  int barX = 124, barY = 12, barHeight = 48;
   display.drawFastVLine(barX + 1, barY, barHeight, SSD1306_WHITE);
   int thumbHeight = barHeight * VISIBLE_GAMES_ITEMS / GAMES_TOTAL;
   int thumbY = barY + ((barHeight - thumbHeight) * currentGamesSelect /
