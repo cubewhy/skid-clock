@@ -56,6 +56,7 @@ enum SystemState {
   STATE_FREE_THE_KEY,
   STATE_PACMAN,
   STATE_SHOOTER,
+  STATE_TETRIS,
 };
 
 enum PomoState { POMO_WORK, POMO_BREAK, POMO_PAUSE };

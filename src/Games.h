@@ -42,4 +42,7 @@ void handlePacmanMode(int vry, int vrx, bool clicked);
 void initShooterGame();
 void handleShooterMode(int vry, int vrx, bool clicked);
 
+void initTetrisGame();
+void handleTetrisMode(int vry, int vrx, bool clicked);
+
 #endif
