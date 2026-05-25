@@ -305,13 +305,21 @@ void handleStopwatch(int vry, int vrx, bool clicked) {
   int sec = totalSec % 60;
   int min = (totalSec / 60) % 60;
   int hour = totalSec / 3600;
+
+  // 获取当前系统时间
+  RtcDateTime nowTime = Rtc.GetDateTime();
+  char timeBuf[9];
+  sprintf(timeBuf, "%02d:%02d:%02d", nowTime.Hour(), nowTime.Minute(),
+          nowTime.Second());
+
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.print(F("STOPWATCH"));
-  display.setCursor(85, 0);
-  display.print(stopwatchRunning ? F("RUN") : F("PAUS"));
+  display.print(stopwatchRunning ? F("SW:RUN") : F("SW:PAUS"));
+  display.setCursor(80, 0); // 右侧对齐显示系统当前实时时间
+  display.print(timeBuf);
   display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
   char buf[16];
   sprintf(buf, "%02d:%02d:%02d", hour * 60 + min, sec, ms100);
   display.setTextSize(2);
@@ -375,11 +383,20 @@ void handleCountdown(int vry, int vrx, bool clicked) {
     }
   }
 
+  // 获取当前系统时间
+  RtcDateTime nowTime = Rtc.GetDateTime();
+  char timeBuf[9];
+  sprintf(timeBuf, "%02d:%02d:%02d", nowTime.Hour(), nowTime.Minute(),
+          nowTime.Second());
+
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.print(F("COUNTDOWN"));
+  display.setCursor(80, 0); // 显示系统当前实时时间
+  display.print(timeBuf);
   display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
   long dispSec =
       countdownSettingMode ? countdownTotalSec : countdownRemainingSec;
   int m = dispSec / 60;
@@ -401,8 +418,8 @@ void handleCountdown(int vry, int vrx, bool clicked) {
     if (countdownRemainingSec == 0)
       display.print(F("TIME UP! [Joy-D] Return"));
     else
-      display.print(countdownRunning ? F("[Click]Paus  [Joy-D]Stop")
-                                     : F("[Click]Run   [Joy-D]Stop"));
+      display.print(countdownRunning ? F("[Click]Paus   [Joy-D]Stop")
+                                     : F("[Click]Run    [Joy-D]Stop"));
   }
 }
 
@@ -437,16 +454,23 @@ void handlePomodoro(int vry, int vrx, bool clicked) {
     }
   }
 
+  // 获取当前系统时间
+  RtcDateTime nowTime = Rtc.GetDateTime();
+  char timeBuf[9];
+  sprintf(timeBuf, "%02d:%02d:%02d", nowTime.Hour(), nowTime.Minute(),
+          nowTime.Second());
+
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.print(F("POMODORO"));
-  display.setCursor(85, 0);
   if (pomoState == POMO_PAUSE)
-    display.print(F("[PAUSE]"));
+    display.print(F("POMO:PAUS"));
   else
-    display.print(pomoState == POMO_WORK ? F("FOCUSED") : F("BREAK"));
+    display.print(pomoState == POMO_WORK ? F("POMO:FOC") : F("POMO:BRK"));
+  display.setCursor(80, 0); // 显示系统当前实时时间
+  display.print(timeBuf);
   display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
   int m = pomoRemainingSec / 60;
   int s = pomoRemainingSec % 60;
   char buf[8];
