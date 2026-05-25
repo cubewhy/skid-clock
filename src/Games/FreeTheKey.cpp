@@ -220,7 +220,7 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
       display.print(F("[Release Joystick]"));
     } else {
       // 已经释放过，进入标准就绪态
-      display.print(F("[Joy/Click] Next Lvl"));
+      display.print(F("[Joy/Click] Next"));
     }
     return;
   }
