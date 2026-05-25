@@ -5,8 +5,12 @@
 #include <time.h>
 
 static const char *wifiMenuItems[] = {"1. Scan Networks", "2. Add Hidden WiFi",
-                                      "3. < Back"};
+                                      "3. Disconnect WiFi",
+                                      "4. Manual NTP Sync", "5. < Back"};
+static const int WIFI_TOTAL = 5;
+static const int VISIBLE_WIFI_ITEMS = 3;
 static int currentWiFiSelect = 0;
+static int wifiScrollTop = 0;
 
 static char wifiSSID[33] = "";
 static char wifiPassword[65] = "";
@@ -37,10 +41,11 @@ void handleWiFiMenu(int vry, int vrx, bool clicked) {
   bool selectTriggered = clicked;
   if (millis() - lastJoyAction > JOY_DELAY) {
     if (vry < 1000) {
-      currentWiFiSelect = (currentWiFiSelect == 0) ? 2 : currentWiFiSelect - 1;
+      currentWiFiSelect =
+          (currentWiFiSelect == 0) ? WIFI_TOTAL - 1 : currentWiFiSelect - 1;
       lastJoyAction = millis();
     } else if (vry > 3000) {
-      currentWiFiSelect = (currentWiFiSelect + 1) % 3;
+      currentWiFiSelect = (currentWiFiSelect + 1) % WIFI_TOTAL;
       lastJoyAction = millis();
     } else if (vrx < 1000) {
       currentState = STATE_MAIN_MENU;
@@ -50,6 +55,12 @@ void handleWiFiMenu(int vry, int vrx, bool clicked) {
       selectTriggered = true;
       lastJoyAction = millis();
     }
+
+    // 平滑视口上下翻页滚动计算
+    if (currentWiFiSelect < wifiScrollTop)
+      wifiScrollTop = currentWiFiSelect;
+    else if (currentWiFiSelect >= wifiScrollTop + VISIBLE_WIFI_ITEMS)
+      wifiScrollTop = currentWiFiSelect - VISIBLE_WIFI_ITEMS + 1;
   }
 
   if (selectTriggered) {
@@ -66,6 +77,41 @@ void handleWiFiMenu(int vry, int vrx, bool clicked) {
       initGlobalKeyboard("Enter Hidden SSID:", wifiSSID, 33,
                          onHiddenSSIDConfirm);
       currentState = STATE_WIFI_KEYBOARD;
+    } else if (currentWiFiSelect == 2) {
+      // 3. 断开当前 WiFi 连接
+      WiFi.disconnect(true, true);
+      WiFi.mode(WIFI_OFF);
+      display.clearDisplay();
+      display.setCursor(15, 25);
+      display.print(F("WiFi Disconnected"));
+      display.display();
+      delay(1200);
+    } else if (currentWiFiSelect == 3) {
+      // 4. 手动触发实时 NTP 校时
+      display.clearDisplay();
+      display.setCursor(10, 15);
+      display.print(F("Syncing NTP..."));
+      display.display();
+      if (WiFi.status() == WL_CONNECTED) {
+        configTime(8 * 3600, 0, "ntp.ntsc.ac.cn", "pool.ntp.org");
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo, 4000)) {
+          RtcDateTime ntpTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
+                              timeinfo.tm_mday, timeinfo.tm_hour,
+                              timeinfo.tm_min, timeinfo.tm_sec);
+          Rtc.SetDateTime(ntpTime);
+          display.setCursor(10, 35);
+          display.print(F("Sync Success OK!"));
+        } else {
+          display.setCursor(10, 35);
+          display.print(F("NTP Sync Timeout"));
+        }
+      } else {
+        display.setCursor(10, 35);
+        display.print(F("Error: No Network"));
+      }
+      display.display();
+      delay(1500);
     } else {
       currentState = STATE_MAIN_MENU;
     }
@@ -75,16 +121,41 @@ void handleWiFiMenu(int vry, int vrx, bool clicked) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println(F("=== WIFI MANAGER ==="));
-  display.drawFastHLine(0, 10, 128, SCREEN_WIDTH);
-  for (int i = 0; i < 3; i++) {
-    display.setCursor(5, 16 + (i * 12));
-    if (i == currentWiFiSelect)
+
+  // 如果已联网，动态在头部实时渲染展示当前 SSID 状态
+  if (WiFi.status() == WL_CONNECTED) {
+    display.print(F("SSID: "));
+    String showSSID = WiFi.SSID();
+    if (showSSID.length() > 14)
+      showSSID = showSSID.substring(0, 11) + "...";
+    display.println(showSSID);
+  } else {
+    display.println(F("=== WIFI MANAGER ==="));
+  }
+  display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+  // 视口动态范围画出菜单项
+  for (int i = 0; i < VISIBLE_WIFI_ITEMS; i++) {
+    int itemIdx = wifiScrollTop + i;
+    if (itemIdx >= WIFI_TOTAL)
+      break;
+    display.setCursor(5, 14 + (i * 12));
+    if (itemIdx == currentWiFiSelect)
       display.print(F("> "));
     else
       display.print(F("  "));
-    display.println(wifiMenuItems[i]);
+    display.println(wifiMenuItems[itemIdx]);
   }
+
+  int barX = 124, barY = 14, barHeight = 34;
+  display.drawFastVLine(barX + 1, barY, barHeight, SSD1306_WHITE);
+  int thumbHeight = barHeight * VISIBLE_WIFI_ITEMS / WIFI_TOTAL;
+  int thumbY =
+      barY + ((barHeight - thumbHeight) * currentWiFiSelect / (WIFI_TOTAL - 1));
+  display.fillRect(barX, thumbY, 3, thumbHeight, SSD1306_WHITE);
+  display.drawFastHLine(0, 51, 128, SSD1306_WHITE);
+  display.setCursor(2, 55);
+  display.print(F("Back to Menu -> [Back]"));
 }
 
 void handleWiFiScan(int vry, int vrx, bool clicked) {
@@ -122,7 +193,6 @@ void handleWiFiScan(int vry, int vrx, bool clicked) {
     return;
   }
 
-  // ✨ 统一进退激活判定标志
   bool actionTriggered = false;
   if (clicked) {
     actionTriggered = true;
@@ -143,7 +213,7 @@ void handleWiFiScan(int vry, int vrx, bool clicked) {
     } else if (vrx > 3000) {
       actionTriggered = true;
       lastJoyAction = millis();
-    } // ✨ 核心修改 1：向右移动摇杆同样触发连接流
+    }
 
     if (scanSelectIdx < scanScrollTop)
       scanScrollTop = scanSelectIdx;
@@ -156,7 +226,6 @@ void handleWiFiScan(int vry, int vrx, bool clicked) {
     wifiPassword[0] = '\0';
 
     if (WiFi.encryptionType(scanSelectIdx) == WIFI_AUTH_OPEN) {
-      // wifi with no password
       currentState = STATE_WIFI_CONNECTING;
       connectStartTime = millis();
       WiFi.disconnect(true);
@@ -190,7 +259,6 @@ void handleWiFiScan(int vry, int vrx, bool clicked) {
     String name = WiFi.SSID(curIdx);
     bool isOpen = (WiFi.encryptionType(curIdx) == WIFI_AUTH_OPEN);
 
-    // ✨ UI 增强：如果是开放网络，预留空间并在右侧打上开放标记 [O]
     int maxDisplayLen = isOpen ? 8 : 12;
     if (name.length() > maxDisplayLen)
       name = name.substring(0, maxDisplayLen - 1) + "~";
