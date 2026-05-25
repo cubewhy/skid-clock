@@ -57,4 +57,7 @@ void handleRunner3DMode(int vry, int vrx, bool clicked);
 void initTankTroubleGame();
 void handleTankTroubleMode(int vry, int vrx, bool clicked);
 
+void initUndertaleGame();
+void handleUndertaleMode(int vry, int vrx, bool clicked);
+
 #endif

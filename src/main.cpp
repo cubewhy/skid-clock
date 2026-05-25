@@ -118,7 +118,8 @@ void loop() {
              currentState == STATE_TARGET_RANGE ||
              currentState == STATE_TETRIS || currentState == STATE_3D_RACING ||
              currentState == STATE_3D_RUNNER ||
-             currentState == STATE_TANK_TROUBLE)
+             currentState == STATE_TANK_TROUBLE ||
+             currentState == STATE_UNDERTALE)
       currentState = STATE_GAMES_MENU;
     else if (currentState == STATE_PET)
       currentState = petEnteredViaTimeout ? STATE_CLOCK : STATE_MAIN_MENU;
@@ -214,6 +215,9 @@ void loop() {
     break;
   case STATE_TANK_TROUBLE:
     handleTankTroubleMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_UNDERTALE:
+    handleUndertaleMode(vryVal, vrxVal, isClicked);
     break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);
