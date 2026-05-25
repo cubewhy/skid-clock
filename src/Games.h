@@ -39,4 +39,7 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked);
 void initPacmanGame();
 void handlePacmanMode(int vry, int vrx, bool clicked);
 
+void initShooterGame();
+void handleShooterMode(int vry, int vrx, bool clicked);
+
 #endif

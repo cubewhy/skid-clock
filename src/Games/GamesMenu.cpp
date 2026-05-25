@@ -4,8 +4,8 @@
 static const char *gameMenuItems[] = {
     "1. Snake Game",    "2. Gomoku Game", "3. 2048 Game",    "4. Dino Run",
     "5. Brick Breaker", "6. Stack Tower", "7. Naval Battle", "8. Gold Miner",
-    "9. Free The Key",  "10. Pac-Man",    "11. < Back"};
-static const int GAMES_TOTAL = 11;
+    "9. Free The Key",  "10. Pac-Man",    "11. Air Combat",  "12. < Back"};
+static const int GAMES_TOTAL = 12;
 static const int VISIBLE_GAMES_ITEMS = 4;
 static int currentGamesSelect = 0;
 static int gamesScrollTop = 0;
@@ -78,6 +78,10 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_PACMAN;
       break;
     case 10:
+      initShooterGame();
+      currentState = STATE_SHOOTER;
+      break;
+    case 11:
       currentState = STATE_MAIN_MENU;
       break;
     }
