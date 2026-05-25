@@ -30,4 +30,7 @@ void handleStackMode(int vry, int vrx, bool clicked);
 void initNavalGame();
 void handleNavalPlay(int vry, int vrx, bool clicked);
 
+void initGoldMinerGame();
+void handleGoldMinerMode(int vry, int vrx, bool clicked);
+
 #endif

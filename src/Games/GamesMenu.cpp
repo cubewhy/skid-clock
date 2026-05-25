@@ -2,9 +2,10 @@
 #include "../Games.h"
 
 static const char *gameMenuItems[] = {
-    "1. Snake Game",    "2. Gomoku Game", "3. 2048 Game",    "4. Dino Run",
-    "5. Brick Breaker", "6. Stack Tower", "7. Naval Battle", "8. < Back"};
-static const int GAMES_TOTAL = 8;
+    "1. Snake Game",   "2. Gomoku Game",   "3. 2048 Game",
+    "4. Dino Run",     "5. Brick Breaker", "6. Stack Tower",
+    "7. Naval Battle", "8. Gold Miner",    "9. < Back"};
+static const int GAMES_TOTAL = 9;
 static const int VISIBLE_GAMES_ITEMS = 3;
 static int currentGamesSelect = 0;
 static int gamesScrollTop = 0;
@@ -65,6 +66,10 @@ void handleGamesMenu(int vry, int vrx, bool clicked) {
       currentState = STATE_NAVAL_PLAY;
       break;
     case 7:
+      initGoldMinerGame();
+      currentState = STATE_GOLDMINER;
+      break;
+    case 8:
       currentState = STATE_MAIN_MENU;
       break;
     }
