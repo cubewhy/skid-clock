@@ -112,7 +112,8 @@ void loop() {
              currentState == STATE_2048 || currentState == STATE_DINO ||
              currentState == STATE_BRICK || currentState == STATE_STACK ||
              currentState == STATE_NAVAL_PLAY ||
-             currentState == STATE_GOLDMINER)
+             currentState == STATE_GOLDMINER ||
+             currentState == STATE_FREE_THE_KEY)
       currentState = STATE_GAMES_MENU;
     else if (currentState == STATE_PET)
       currentState = petEnteredViaTimeout ? STATE_CLOCK : STATE_MAIN_MENU;
@@ -184,6 +185,9 @@ void loop() {
     break;
   case STATE_GOLDMINER:
     handleGoldMinerMode(vrxVal, vryVal, isClicked);
+    break;
+  case STATE_FREE_THE_KEY:
+    handleFreeKeyMode(vryVal, vrxVal, isClicked);
     break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);

@@ -33,4 +33,7 @@ void handleNavalPlay(int vry, int vrx, bool clicked);
 void initGoldMinerGame();
 void handleGoldMinerMode(int vry, int vrx, bool clicked);
 
+void initFreeKeyGame();
+void handleFreeKeyMode(int vry, int vrx, bool clicked);
+
 #endif
