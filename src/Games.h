@@ -36,4 +36,7 @@ void handleGoldMinerMode(int vry, int vrx, bool clicked);
 void initFreeKeyGame();
 void handleFreeKeyMode(int vry, int vrx, bool clicked);
 
+void initPacmanGame();
+void handlePacmanMode(int vry, int vrx, bool clicked);
+
 #endif
