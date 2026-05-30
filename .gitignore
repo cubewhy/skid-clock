@@ -1,2 +1,4 @@
 .pio
-compile_commands.json
+/compile_commands.json
+/fk_level_generator
+include/FKLevels.h
