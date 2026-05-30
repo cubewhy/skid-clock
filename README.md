@@ -201,6 +201,8 @@ pio run -t upload
 
 ### 解放钥匙 (Free The Key)
 
+> Original level generator: [fogleman/rush](https://github.com/fogleman/rush)
+
 - 摇杆移动
 - 按下中键选择要移动的方块
 - 如果处于移动模式, 按下中键退出移动模式 (即进入选择模式)
