@@ -1,7 +1,9 @@
 /*
- * generator.cpp - Multi-threaded Level Generator for "Free The Key"
+ * fk_level_generator.cpp - Multi-threaded Level Generator for "Free The Key"
  * Optimized with Bitwise State Packing, Flat BFS Space Explorer, Simulated
  * Annealing, and Thread-Safe Task Distribution.
+ *
+ * Original generator: https://github.com/fogleman/rush
  */
 
 #include <algorithm>
@@ -9,10 +11,8 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <mutex>
-#include <queue>
 #include <random>
 #include <thread>
 #include <unordered_map>
@@ -22,7 +22,7 @@
 #define GRID_SIZE 6
 #define BOARD_SIZE (GRID_SIZE * GRID_SIZE)
 #define PRIMARY_PIECE_ROW 2
-#define PRIMARY_PIECE_SIZE 3 // Changed from 2 to 3 for a 1x3 key piece
+#define PRIMARY_PIECE_SIZE 3 // 1x3 key piece
 #define MAX_STATES_LIMIT 800
 
 struct Piece {
@@ -205,7 +205,6 @@ struct ExplorerResult {
 ExplorerResult exploreBoard(const Board &b) {
   ExplorerResult res;
   int primary_row = b.pieces[0].position / GRID_SIZE;
-  // Dynamically uses primary piece size (now 3) to calculate the goal position
   int target_pos = primary_row * GRID_SIZE + GRID_SIZE - b.pieces[0].size;
 
   uint64_t start_state = getBoardKey(b);
@@ -302,7 +301,7 @@ bool getRandomPiece(const Board &b, Piece &outPiece, std::mt19937 &rng) {
 
     int pos = y * GRID_SIZE + x;
     if (orientation == 0 && y == PRIMARY_PIECE_ROW)
-      continue; // Row 2 limitation to prevent blocking the key piece track
+      continue; // Row 2 limitation to avoid blocking key piece path
 
     Piece p{(int8_t)pos, (int8_t)size, (int8_t)orientation};
     if (!b.isOccupied(p)) {
@@ -404,7 +403,6 @@ GeneratedLevel generateSingleLevel(const LevelTask &task, std::mt19937 &rng) {
   while (true) {
     Board board;
     board.initEmpty();
-    // Key piece initialized with PRIMARY_PIECE_SIZE (3)
     Piece key_piece{PRIMARY_PIECE_ROW * GRID_SIZE, PRIMARY_PIECE_SIZE, 0};
     board.addPiece(key_piece);
 
@@ -460,16 +458,17 @@ int main() {
   std::cout << "=================================================="
             << std::endl;
 
+  // Level configuration ensuring all targets have minimum moves > 10
   std::vector<LevelTask> tasks;
   for (int i = 1; i <= 100; i++) {
     if (i <= 25) {
-      tasks.push_back({i, 4, 5, 5, 8});
+      tasks.push_back({i, 5, 6, 11, 15}); // Moderate levels (11-15 moves)
     } else if (i <= 50) {
-      tasks.push_back({i, 5, 6, 9, 13});
+      tasks.push_back({i, 6, 7, 16, 20}); // Hard levels (16-20 moves)
     } else if (i <= 75) {
-      tasks.push_back({i, 6, 7, 14, 19});
+      tasks.push_back({i, 7, 8, 21, 25}); // Very Hard levels (21-25 moves)
     } else {
-      tasks.push_back({i, 7, 8, 20, 35});
+      tasks.push_back({i, 8, 9, 26, 40}); // Expert levels (26-40 moves)
     }
   }
 
