@@ -125,7 +125,9 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
         if (b.w > b.h) {
           if (dx != 0) {
             int8_t nx = b.x + dx;
-            if (b.isKey && nx == 4) {
+            // Dynamically check win conditions based on the width of the key
+            // piece
+            if (b.isKey && nx == (GRID_SIZE - b.w)) {
               b.x = nx;
               fkMoves++;
               fkLevelComplete = true;
@@ -207,8 +209,19 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
     if (b.isKey) {
       display.fillRect(bx, by, bw, bh, SSD1306_WHITE);
       display.setTextColor(SSD1306_BLACK);
-      display.setCursor(bx + 4, by + 1);
-      display.print(F("KEY"));
+
+      if (b.w >= 3) {
+        // Standard GFX font char width is 5px + 1px spacing = 6px. 3 chars
+        // ("KEY") = 17px wide.
+        int16_t xOffset = (bw - 17) / 2;
+        display.setCursor(bx + xOffset, by + 1);
+        display.print(F("KEY"));
+      } else {
+        // Standard single char "K" is 5px wide.
+        int16_t xOffset = (bw - 5) / 2;
+        display.setCursor(bx + xOffset, by + 1);
+        display.print(F("K"));
+      }
     } else {
       if (i == fkSelectedIdx) {
         display.fillRect(bx, by, bw, bh, SSD1306_WHITE);

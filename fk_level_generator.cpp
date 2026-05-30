@@ -1,7 +1,7 @@
 /*
  * fk_level_generator.cpp - Multi-threaded Level Generator for "Free The Key"
  * Optimized with Bitwise State Packing, Flat BFS Space Explorer, Simulated
- * Annealing, and Thread-Safe Task Distribution.
+ * Annealing, and Adaptive Constraint Relaxation.
  *
  * Original generator: https://github.com/fogleman/rush
  */
@@ -11,8 +11,10 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <queue>
 #include <random>
 #include <thread>
 #include <unordered_map>
@@ -22,8 +24,8 @@
 #define GRID_SIZE 6
 #define BOARD_SIZE (GRID_SIZE * GRID_SIZE)
 #define PRIMARY_PIECE_ROW 2
-#define PRIMARY_PIECE_SIZE 3 // 1x3 key piece
-#define MAX_STATES_LIMIT 800
+#define PRIMARY_PIECE_SIZE 2 // Reverted back to 1x2 key piece
+#define MAX_STATES_LIMIT 1500
 
 struct Piece {
   int8_t position;    // y * 6 + x
@@ -301,7 +303,7 @@ bool getRandomPiece(const Board &b, Piece &outPiece, std::mt19937 &rng) {
 
     int pos = y * GRID_SIZE + x;
     if (orientation == 0 && y == PRIMARY_PIECE_ROW)
-      continue; // Row 2 limitation to avoid blocking key piece path
+      continue; // Row 2 limitation to prevent blocking the key piece track
 
     Piece p{(int8_t)pos, (int8_t)size, (int8_t)orientation};
     if (!b.isOccupied(p)) {
@@ -398,9 +400,25 @@ struct GeneratedLevel {
   int moves;
 };
 
-// Thread-Safe Level Generator Worker
+// Thread-Safe Level Generator Worker with Fallback Safety
 GeneratedLevel generateSingleLevel(const LevelTask &task, std::mt19937 &rng) {
+  int target_min_moves = task.min_moves;
+  int target_max_moves = task.max_moves;
+  int attempts = 0;
+
   while (true) {
+    attempts++;
+
+    // Safety relaxation: if a specific high-difficulty target takes too long,
+    // slowly widen the scope to ensure threads complete task execution.
+    if (attempts > 300) {
+      if (target_min_moves > 11) {
+        target_min_moves--;
+      }
+      target_max_moves++;
+      attempts = 0;
+    }
+
     Board board;
     board.initEmpty();
     Piece key_piece{PRIMARY_PIECE_ROW * GRID_SIZE, PRIMARY_PIECE_SIZE, 0};
@@ -443,8 +461,8 @@ GeneratedLevel generateSingleLevel(const LevelTask &task, std::mt19937 &rng) {
     }
 
     ExplorerResult res = exploreBoard(best_board);
-    if (res.solvable && res.maxMoves >= task.min_moves &&
-        res.maxMoves <= task.max_moves) {
+    if (res.solvable && res.maxMoves >= target_min_moves &&
+        res.maxMoves <= target_max_moves) {
       sortPiecesCanonical(res.hardestBoard);
       return {res.hardestBoard, res.maxMoves};
     }
@@ -454,21 +472,24 @@ GeneratedLevel generateSingleLevel(const LevelTask &task, std::mt19937 &rng) {
 int main() {
   std::cout << "=================================================="
             << std::endl;
-  std::cout << "      Starting Level Generator  " << std::endl;
+  std::cout << "      Starting Native C++ Thread Level Generator  "
+            << std::endl;
+  std::cout << "         (1x2 Key Piece & Steps > 10 Mode)        "
+            << std::endl;
   std::cout << "=================================================="
             << std::endl;
 
-  // Level configuration ensuring all targets have minimum moves > 10
+  // Level configuration supporting high difficulty targets (> 10 moves)
   std::vector<LevelTask> tasks;
   for (int i = 1; i <= 100; i++) {
     if (i <= 25) {
-      tasks.push_back({i, 5, 6, 11, 15}); // Moderate levels (11-15 moves)
+      tasks.push_back({i, 4, 5, 11, 14}); // Moderate: 11-14 moves
     } else if (i <= 50) {
-      tasks.push_back({i, 6, 7, 16, 20}); // Hard levels (16-20 moves)
+      tasks.push_back({i, 5, 6, 15, 19}); // Hard: 15-19 moves
     } else if (i <= 75) {
-      tasks.push_back({i, 7, 8, 21, 25}); // Very Hard levels (21-25 moves)
+      tasks.push_back({i, 6, 7, 20, 25}); // Very Hard: 20-25 moves
     } else {
-      tasks.push_back({i, 8, 9, 26, 40}); // Expert levels (26-40 moves)
+      tasks.push_back({i, 7, 8, 26, 38}); // Expert: 26-38 moves
     }
   }
 
