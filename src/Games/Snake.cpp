@@ -9,35 +9,51 @@
 static Point snake[SNAKE_MAX_LEN];
 static int snakeLength = 3;
 static SnakeDirection snakeDir = SNAKE_RIGHT;
+static SnakeDirection lastExecutedDir = SNAKE_RIGHT;
 static Point food;
-static uint8_t foodSize = 1; // 食物尺寸比例：1->1x1, 2->2x2, 4->4x4
+static uint8_t foodSize = 1;
 static bool isGameOver = false;
 static unsigned long lastSnakeUpdate = 0;
 static const int snakeSpeed = 150;
 
 static void spawnFood() {
-  // 机制更新：随机几率生成大食物
-  int randVal = random(0, 10);
-  if (randVal < 6) {
-    foodSize = 1; // 60% 基础食物
-  } else if (randVal < 9) {
-    foodSize = 2; // 30% 2x2中型大食物
-  } else {
-    foodSize = 4; // 10% 4x4巨型大食物
-  }
+  int attempts = 0;
+  bool collision;
 
-  food.x = random(0, GRID_WIDTH - foodSize + 1);
-  food.y = random(0, GRID_HEIGHT - foodSize + 1);
-
-  // 保证大食物安全跨域不产生蛇身重叠
-  for (int i = 0; i < snakeLength; i++) {
-    if (snake[i].x >= food.x && snake[i].x < food.x + foodSize &&
-        snake[i].y >= food.y && snake[i].y < food.y + foodSize) {
-      food.x = random(0, GRID_WIDTH - foodSize + 1);
-      food.y = random(0, GRID_HEIGHT - foodSize + 1);
-      i = -1;
+  do {
+    collision = false;
+    // 随机几率生成不同尺寸的食物
+    int randVal = random(0, 10);
+    if (randVal < 6) {
+      foodSize = 1; // 60% 基础食物
+    } else if (randVal < 9) {
+      foodSize = 2; // 30% 中型食物
+    } else {
+      foodSize = 4; // 10% 巨型食物
     }
-  }
+
+    food.x = random(0, GRID_WIDTH - foodSize + 1);
+    food.y = random(0, GRID_HEIGHT - foodSize + 1);
+
+    // 检查是否与蛇身重叠
+    for (int i = 0; i < snakeLength; i++) {
+      if (snake[i].x >= food.x && snake[i].x < food.x + foodSize &&
+          snake[i].y >= food.y && snake[i].y < food.y + foodSize) {
+        collision = true;
+        break;
+      }
+    }
+
+    attempts++;
+    // 如果尝试了100次依然碰撞（通常是身体太长占满了空间），强制改为1x1食物减少碰撞率
+    if (attempts > 100 && foodSize > 1) {
+      foodSize = 1;
+    }
+    // 如果极端情况下依然无法找到完全空闲位置，摆脱循环，避免看门狗复位卡死
+    if (attempts > 200) {
+      break;
+    }
+  } while (collision);
 }
 
 void initSnakeGame() {
@@ -46,6 +62,7 @@ void initSnakeGame() {
   snake[1] = {14, 8};
   snake[2] = {13, 8};
   snakeDir = SNAKE_RIGHT;
+  lastExecutedDir = SNAKE_RIGHT; // 初始化方向锁
   isGameOver = false;
   spawnFood();
 }
@@ -55,7 +72,7 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
     if (clicked)
       currentState = STATE_GAMES_MENU;
     display.clearDisplay();
-    display.setTextWrap(false); // 明确不进行文本自动绕回
+    display.setTextWrap(false);
     display.setTextSize(2);
     display.setCursor(10, 10);
     display.println(F("GAME OVER"));
@@ -65,16 +82,17 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
     display.println(snakeLength - 3);
     display.setCursor(10, 50);
     display.println(F("[Click] return Menu"));
+    display.display(); // 确保渲染物理屏幕
     return;
   }
 
-  if (vrx < 1000 && snakeDir != SNAKE_RIGHT)
+  if (vrx < 1000 && lastExecutedDir != SNAKE_RIGHT)
     snakeDir = SNAKE_LEFT;
-  else if (vrx > 3000 && snakeDir != SNAKE_LEFT)
+  else if (vrx > 3000 && lastExecutedDir != SNAKE_LEFT)
     snakeDir = SNAKE_RIGHT;
-  else if (vry < 1000 && snakeDir != SNAKE_DOWN)
+  else if (vry < 1000 && lastExecutedDir != SNAKE_DOWN)
     snakeDir = SNAKE_UP;
-  else if (vry > 3000 && snakeDir != SNAKE_UP)
+  else if (vry > 3000 && lastExecutedDir != SNAKE_UP)
     snakeDir = SNAKE_DOWN;
 
   if (clicked) {
@@ -84,9 +102,16 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
 
   if (millis() - lastSnakeUpdate > snakeSpeed) {
     lastSnakeUpdate = millis();
+    lastExecutedDir = snakeDir; // 在每次真正产生位移时，锁定本次方向
+
+    // 记录移动前的尾部坐标，用于后续平滑生长增加节点
+    Point oldTail = snake[snakeLength - 1];
+
+    // 移动蛇身
     for (int i = snakeLength - 1; i > 0; i--)
       snake[i] = snake[i - 1];
 
+    // 移动蛇头
     if (snakeDir == SNAKE_UP)
       snake[0].y--;
     else if (snakeDir == SNAKE_DOWN)
@@ -96,7 +121,7 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
     else if (snakeDir == SNAKE_RIGHT)
       snake[0].x++;
 
-    // 核心修改 1：碰到墙壁时直接从对侧穿过去浮现，不再直接死亡
+    // 穿越墙壁逻辑
     if (snake[0].x < 0)
       snake[0].x = GRID_WIDTH - 1;
     else if (snake[0].x >= GRID_WIDTH)
@@ -107,7 +132,7 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
     else if (snake[0].y >= GRID_HEIGHT)
       snake[0].y = 0;
 
-    // 核心修改 2：只在咬到自身内部环节时判定死亡
+    // 咬到自身判定死亡
     for (int i = 1; i < snakeLength; i++) {
       if (snake[0].x == snake[i].x && snake[0].y == snake[i].y) {
         isGameOver = true;
@@ -115,15 +140,16 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
       }
     }
 
-    // 核心修改 3：大食物范围碰撞盒精准交叉感知
+    // 精准碰撞感知
     if (snake[0].x >= food.x && snake[0].x < food.x + foodSize &&
         snake[0].y >= food.y && snake[0].y < food.y + foodSize) {
 
-      // 依食物物理大小获得等倍数的得分和更长的生长度
       int growFactor = foodSize * foodSize;
       for (int g = 0; g < growFactor; g++) {
-        if (snakeLength < SNAKE_MAX_LEN)
+        if (snakeLength < SNAKE_MAX_LEN) {
+          snake[snakeLength] = oldTail;
           snakeLength++;
+        }
       }
       spawnFood();
     }
@@ -132,7 +158,7 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
   display.clearDisplay();
   display.setTextWrap(false);
 
-  // 核心修改 4：游戏内左上角实时显示玩家当前分数
+  // 游戏内左上角实时显示玩家当前分数
   display.setCursor(2, 2);
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -150,10 +176,13 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
   int foodPixelSize = foodSize * SNAKE_BLOCK_SIZE;
   display.drawRect(food.x * SNAKE_BLOCK_SIZE, food.y * SNAKE_BLOCK_SIZE,
                    foodPixelSize, foodPixelSize, SSD1306_WHITE);
-  // 如果是大食物，内部进行饱满填充以区别视觉观感
+
+  // 大食物饱满填充
   if (foodSize > 1) {
     display.fillRect(food.x * SNAKE_BLOCK_SIZE + 1,
                      food.y * SNAKE_BLOCK_SIZE + 1, foodPixelSize - 2,
                      foodPixelSize - 2, SSD1306_WHITE);
   }
+
+  display.display(); // 确保渲染物理屏幕
 }
