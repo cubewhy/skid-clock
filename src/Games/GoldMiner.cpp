@@ -19,7 +19,7 @@ struct GoldItem {
   bool active;
 };
 
-#define TOTAL_MINERALS 8 // 提升至 8 个矿物，丰富地图密集度
+#define TOTAL_MINERALS 8
 static GoldItem minerals[TOTAL_MINERALS];
 static int scoreMiner = 0;
 static int grabbedIdx = -1;
@@ -31,7 +31,7 @@ static const unsigned long LEVEL_DURATION = 60000; // 每关 60 秒
 static bool minerGameOver = false;
 static bool minerLevelComplete = false;
 
-// 矿物随机生成核心（带总价值动态回传）
+// 矿物随机生成核心
 static int generateMinerals() {
   int totalVal = 0;
   for (int i = 0; i < TOTAL_MINERALS; i++) {
@@ -41,23 +41,20 @@ static int generateMinerals() {
 
     int typeChance = random(0, 10); // 0-4 石头, 5-8 黄金, 9 钻石
     if (typeChance < 5) {
-      // 【石头】
       minerals[i].radius = random(4, 7);
       minerals[i].value = random(15, 40);
       minerals[i].weight = random(4, 6);
     } else if (typeChance < 9) {
-      // 【黄金】
       minerals[i].radius = random(3, 6);
       minerals[i].value = minerals[i].radius * 70;
       minerals[i].weight = random(2, 4);
     } else {
-      // 【钻石】
       minerals[i].radius = 2;
       minerals[i].value = 400;
       minerals[i].weight = 1;
     }
 
-    // 防重叠洗牌过滤
+    // 防重叠过滤
     for (int j = 0; j < i; j++) {
       float dist = sqrt(pow(minerals[i].x - minerals[j].x, 2) +
                         pow(minerals[i].y - minerals[j].y, 2));
@@ -67,7 +64,6 @@ static int generateMinerals() {
         j = -1;
       }
     }
-    // 实时累加这张图里的理论全量总金额
     totalVal += minerals[i].value;
   }
   return totalVal;
@@ -84,9 +80,8 @@ void initGoldMinerGame() {
   grabbedIdx = -1;
   levelStartTime = millis();
 
-  // 第一关目标：必须拿下当前矿产总值的 50%
   int currentMapValue = generateMinerals();
-  targetScore = currentMapValue * 0.50f;
+  targetScore = currentMapValue * 0.50f; // 第一关目标
 }
 
 void handleGoldMinerMode(int vry, int vrx, bool clicked) {
@@ -115,16 +110,19 @@ void handleGoldMinerMode(int vry, int vrx, bool clicked) {
     if (clicked || vrx < 1000 || vrx > 3000 || vry < 1000 || vry > 3000) {
       minerLevel++;
 
-      // 生成下一关新地图并拿到新总价
       int currentMapValue = generateMinerals();
 
-      // 动态梯度难度控制：每一关要求的吸金比例提高 2%，最高到 75% 封顶
       float targetRatio = 0.50f + (minerLevel * 0.02f);
       if (targetRatio > 0.75f)
         targetRatio = 0.75f;
 
-      // 累计目标金额 = 上关要求基线 + (新地图总价值 * 难度系数)
+      // 基础累加目标
       targetScore += (currentMapValue * targetRatio);
+
+      // 【防躺赢保护机制】确保下一关的目标金额一定要大于当前拥有的金额
+      if (targetScore <= scoreMiner) {
+        targetScore = scoreMiner + (currentMapValue * 0.30f);
+      }
 
       minerState = MINER_SWING;
       hookAngle = 0.0f;
@@ -153,7 +151,6 @@ void handleGoldMinerMode(int vry, int vrx, bool clicked) {
   if (timeLeft < 0)
     timeLeft = 0;
 
-  // 时限到期判定
   if (timeLeft <= 0) {
     if (scoreMiner >= targetScore) {
       minerLevelComplete = true;
@@ -169,8 +166,6 @@ void handleGoldMinerMode(int vry, int vrx, bool clicked) {
     if (hookAngle > 1.3f || hookAngle < -1.3f) {
       hookSpeed = -hookSpeed;
     }
-
-    // 任意方向摇杆或按键均可触发弹射
     if (vrx < 1000 || vrx > 3000 || vry < 1000 || vry > 3000 || clicked) {
       minerState = MINER_EXTEND;
     }
@@ -240,39 +235,34 @@ void handleGoldMinerMode(int vry, int vrx, bool clicked) {
 
   // === 绘图渲染层 ===
   display.clearDisplay();
-  display.setTextWrap(false); // 强制关闭折行拦截
+  display.setTextWrap(false);
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
 
   display.setCursor(2, 0);
   display.print(F("L"));
-  display.print(minerLevel); // X=2 处开始：支持到 L99 (占 18 像素)
+  display.print(minerLevel);
 
   display.setCursor(24, 0);
   display.print(F("G"));
-  display.print(targetScore); // X=24 处开始：支持到 G12500 (占 36 像素)
+  display.print(targetScore);
 
   display.setCursor(68, 0);
   display.print(F("T"));
-  display.print(timeLeft); // X=68 处开始：支持到 T60 (占 18 像素)
+  display.print(timeLeft);
 
   display.setCursor(90, 0);
   display.print(F("$"));
-  display.print(scoreMiner); // X=90 处开始：支持到 $15400 (占 36 像素，刚好到
-                             // 126 像素完美收官)
+  display.print(scoreMiner);
 
   display.drawFastHLine(0, 10, SCREEN_WIDTH, SSD1306_WHITE);
-
-  // 滑轮机台支架
   display.fillRect(60, 11, 9, 3, SSD1306_WHITE);
 
-  // 绳索与钩子
   int endX = 64 + sin(hookAngle) * hookLength;
   int endY = 14 + cos(hookAngle) * hookLength;
   display.drawLine(64, 14, endX, endY, SSD1306_WHITE);
   display.drawCircle(endX, endY, 2, SSD1306_WHITE);
 
-  // 渲染地底矿石
   for (int i = 0; i < TOTAL_MINERALS; i++) {
     if (minerals[i].active) {
       if (minerals[i].value >= 100) {
