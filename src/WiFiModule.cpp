@@ -94,7 +94,8 @@ void handleWiFiMenu(int vry, int vrx, bool clicked) {
       display.print(F("Syncing NTP..."));
       display.display();
       if (WiFi.status() == WL_CONNECTED) {
-        configTime(GMT_OFFSET * 3600, 0, "ntp.ntsc.ac.cn", "pool.ntp.org");
+        configTime(GMT_OFFSET * 3600, 0, "ntp.ntsc.ac.cn", "ntp.aliyun.com",
+                   "pool.ntp.org");
         struct tm timeinfo;
         if (getLocalTime(&timeinfo, 4000)) {
           RtcDateTime ntpTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
