@@ -32,7 +32,13 @@
 ## 刷写固件
 
 ```shell
-pio run -t upload
+make upload
+```
+
+### 生成文件
+
+```shell
+make generate
 ```
 
 ## 功能
