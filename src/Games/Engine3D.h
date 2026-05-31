@@ -16,8 +16,7 @@ struct P3DObject {
   bool active;
 };
 
-// 👈 核心抽象算法：将 3D 世界空间坐标，通过相机视角转换，投影到 2D OLED
-// 点阵图上
+// 将 3D 世界空间坐标，通过相机视角转换，投影到 2D OLED 点阵图上
 static inline bool project3D(float x3d, float y3d, float z3d, float camX,
                              float camY, float camZ, int &screenX, int &screenY,
                              int &projectedScale) {

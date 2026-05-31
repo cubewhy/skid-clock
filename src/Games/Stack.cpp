@@ -17,6 +17,7 @@ static int towerWidths[MAX_STACK_LAYERS];
 static int towerXs[MAX_STACK_LAYERS];
 static int cameraViewOffsetY = 0;
 static bool joyMoveLatched = false;
+static bool stackEntryReleased = false;
 
 void initStackGame() {
   scoreStack = 0;
@@ -29,6 +30,7 @@ void initStackGame() {
   stackIsFalling = false;
   cameraViewOffsetY = 0;
   joyMoveLatched = false;
+  stackEntryReleased = false;
   memset(towerWidths, 0, sizeof(towerWidths));
   memset(towerXs, 0, sizeof(towerXs));
   towerWidths[0] = 50;
@@ -53,11 +55,21 @@ void handleStackMode(int vry, int vrx, bool clicked) {
     display.println(F("[Click] return Menu"));
     return;
   }
+
+  bool joyMoved = (vrx < 1000 || vrx > 3000 || vry < 1000 || vry > 3000);
+
+  if (!stackEntryReleased) {
+    if (!joyMoved && !clicked) {
+      stackEntryReleased = true;
+    }
+    joyMoved = false;
+    clicked = false;
+  }
+
   if (clicked) {
     currentState = STATE_GAMES_MENU;
     return;
   }
-  bool joyMoved = (vrx < 1000 || vrx > 3000 || vry < 1000 || vry > 3000);
   if (joyMoved) {
     if (!joyMoveLatched && !stackIsFalling) {
       stackIsFalling = true;

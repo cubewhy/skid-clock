@@ -119,7 +119,8 @@ void loop() {
              currentState == STATE_TETRIS || currentState == STATE_3D_RACING ||
              currentState == STATE_3D_RUNNER ||
              currentState == STATE_TANK_TROUBLE ||
-             currentState == STATE_UNDERTALE)
+             currentState == STATE_UNDERTALE ||
+             currentState == STATE_JUMPJUMP || currentState == STATE_FLAPPY)
       currentState = STATE_GAMES_MENU;
     else if (currentState == STATE_PET)
       currentState = petEnteredViaTimeout ? STATE_CLOCK : STATE_MAIN_MENU;
@@ -218,6 +219,12 @@ void loop() {
     break;
   case STATE_UNDERTALE:
     handleUndertaleMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_JUMPJUMP:
+    handleJumpJumpMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_FLAPPY:
+    handleFlappyMode(vryVal, vrxVal, isClicked);
     break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);

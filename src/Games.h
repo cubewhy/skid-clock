@@ -60,4 +60,10 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked);
 void initUndertaleGame();
 void handleUndertaleMode(int vry, int vrx, bool clicked);
 
+void initJumpJumpGame();
+void handleJumpJumpMode(int vry, int vrx, bool clicked);
+
+void initFlappyGame();
+void handleFlappyMode(int vry, int vrx, bool clicked);
+
 #endif

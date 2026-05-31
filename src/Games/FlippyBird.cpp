@@ -39,6 +39,7 @@ void handleFlappyMode(int vry, int vrx, bool clicked) {
     display.setCursor(10, 38);
     display.print(F("Score: "));
     display.println(flScore);
+    display.print(F("[Click] to return"));
     return;
   }
 
