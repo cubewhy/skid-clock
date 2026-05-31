@@ -66,6 +66,8 @@ pio run -t upload
 - 全民打飞机
 - 吃豆人
 - 传说之下 (简易版本)
+- 跳一跳
+- Flappy Bird
 
 ## 使用指南
 
@@ -245,6 +247,14 @@ pio run -t upload
 ### 传说之下
 
 - 摇杆移动
+
+## 跳一跳
+
+- 拉摇杆蓄力
+
+## Flappy Bird
+
+- 拉摇杆向上飞行
 
 ## License
 
