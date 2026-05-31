@@ -24,42 +24,57 @@ void processIRInput(int &vrx, int &vry, bool &clicked, bool &shortPress,
                     bool &anyInput) {
   decode_results results;
 
-  if (irrecv.decode(&results)) {
-    // 过滤掉红外协议中的长按连续重复帧 (repeat)，保证单次触发的稳定性
-    if (!results.repeat) {
-      // 在新库中，results.command 存储了解码后的指令数值
-      uint32_t cmd = results.command;
+  // 静态变量，用于记住上一次按下的是哪个键
+  static uint32_t lastValidCmd = 0;
 
-      switch (cmd) {
-      case IR_REMOTE_CMD_UP:
-        vry = 500; // 模拟物理摇杆推向上极限
-        anyInput = true;
-        break;
-      case IR_REMOTE_CMD_DOWN:
-        vry = 3500; // 模拟物理摇杆推向下极限
-        anyInput = true;
-        break;
-      case IR_REMOTE_CMD_LEFT:
-        vrx = 500; // 模拟物理摇杆推向左极限
-        anyInput = true;
-        break;
-      case IR_REMOTE_CMD_RIGHT:
-        vrx = 3500; // 模拟物理摇杆推向右极限
-        anyInput = true;
-        break;
-      case IR_REMOTE_CMD_OK:
-        clicked = true; // 模拟物理摇杆下压 Click
-        anyInput = true;
-        break;
-      case IR_REMOTE_CMD_BACK:
-        shortPress = true; // 模拟物理 Back 按键触发
-        anyInput = true;
-        break;
-      default:
-        break;
-      }
+  if (irrecv.decode(&results)) {
+    uint32_t cmd = 0;
+
+    if (results.repeat) {
+      // 1. 如果检测到是“重复帧”，说明用户正按住按键不放
+      // 此时 results.command 通常为空，我们直接沿用上一次记录的有效指令
+      cmd = lastValidCmd;
+    } else {
+      // 2. 如果是第一次按下的新物理按键
+      cmd = results.command;
+      lastValidCmd = cmd; // 刷新“最后一次有效指令”的记录
     }
-    // 释放接收锁，使能下一次硬件 RMT 脉冲捕获
+
+    // 3. 执行对应的模拟动作（无论是单次按下还是按住，都会进入这里）
+    switch (cmd) {
+    case IR_REMOTE_CMD_UP:
+      vry = 500; // 按住不放时，vry 会以约 110ms 的频率持续输出 500
+      anyInput = true;
+      break;
+    case IR_REMOTE_CMD_DOWN:
+      vry = 3500;
+      anyInput = true;
+      break;
+    case IR_REMOTE_CMD_LEFT:
+      vrx = 500;
+      anyInput = true;
+      break;
+    case IR_REMOTE_CMD_RIGHT:
+      vrx = 3500;
+      anyInput = true;
+      break;
+    case IR_REMOTE_CMD_OK:
+      // 注意：确认键通常不建议支持连发，防止误触发双击
+      if (!results.repeat) {
+        clicked = true;
+        anyInput = true;
+      }
+      break;
+    case IR_REMOTE_CMD_BACK:
+      if (!results.repeat) {
+        shortPress = true;
+        anyInput = true;
+      }
+      break;
+    default:
+      break;
+    }
+
     irrecv.resume();
   }
 }
