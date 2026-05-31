@@ -2,9 +2,11 @@
 #include "Config.h"
 #include "DeveloperTools.h"
 #include "Games.h"
+#include "IRrecv.h"
 #include "Keyboard.h"
 #include "LobstersReader.h"
 #include "MainMenu.h"
+#include "Options.h"
 #include "Pet.h"
 #include "TimeTools.h"
 #include "WiFiModule.h"
@@ -12,6 +14,55 @@
 static int lastBackState = HIGH;
 static unsigned long backBtnDownTime = 0;
 static bool longPressTriggered = false;
+
+IRrecv irrecv(IR_RECV_PIN);
+
+/**
+ * @brief 统一红外输入解析器：将红外远程控制报文转换为系统原生操控总线信号
+ */
+void processIRInput(int &vrx, int &vry, bool &clicked, bool &shortPress,
+                    bool &anyInput) {
+  decode_results results;
+
+  if (irrecv.decode(&results)) {
+    // 过滤掉红外协议中的长按连续重复帧 (repeat)，保证单次触发的稳定性
+    if (!results.repeat) {
+      // 在新库中，results.command 存储了解码后的指令数值
+      uint32_t cmd = results.command;
+
+      switch (cmd) {
+      case IR_REMOTE_CMD_UP:
+        vry = 500; // 模拟物理摇杆推向上极限
+        anyInput = true;
+        break;
+      case IR_REMOTE_CMD_DOWN:
+        vry = 3500; // 模拟物理摇杆推向下极限
+        anyInput = true;
+        break;
+      case IR_REMOTE_CMD_LEFT:
+        vrx = 500; // 模拟物理摇杆推向左极限
+        anyInput = true;
+        break;
+      case IR_REMOTE_CMD_RIGHT:
+        vrx = 3500; // 模拟物理摇杆推向右极限
+        anyInput = true;
+        break;
+      case IR_REMOTE_CMD_OK:
+        clicked = true; // 模拟物理摇杆下压 Click
+        anyInput = true;
+        break;
+      case IR_REMOTE_CMD_BACK:
+        shortPress = true; // 模拟物理 Back 按键触发
+        anyInput = true;
+        break;
+      default:
+        break;
+      }
+    }
+    // 释放接收锁，使能下一次硬件 RMT 脉冲捕获
+    irrecv.resume();
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -25,7 +76,7 @@ void setup() {
   analogSetAttenuation(ADC_11db);
   Wire.begin(OLED_SDA, OLED_SCL);
 
-  initIR();
+  irrecv.enableIRIn();
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("SSD1306 allocation failed"));
@@ -83,6 +134,10 @@ void loop() {
       longPressTriggered = true;
       anyInputDetected = true;
     }
+  }
+
+  if (currentState != STATE_IR_DEBUGGER) {
+    processIRInput(vrxVal, vryVal, isClicked, shortPress, anyInputDetected);
   }
 
   if (currentState == STATE_BRICK || currentState == STATE_PET) {

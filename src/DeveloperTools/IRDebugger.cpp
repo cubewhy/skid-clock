@@ -1,20 +1,23 @@
 #include "../Config.h"
 #include "../DeveloperTools.h"
-#include <IRremote.hpp>
+#include <IRrecv.h>
+#include <IRutils.h>
+
+// 声明定义在 main.cpp 中的全局红外接收实例
+extern IRrecv irrecv;
 
 // 定义一条红外捕获记录的轻量结构体，规避动态内存分配
 struct IRRecord {
-  const char *protocolName;
+  decode_type_t
+      protocolType; // 存储枚举类型，规避临时 String 销毁导致的悬空指针
   uint16_t address;
   uint16_t command;
-  uint32_t rawData;
+  uint64_t rawData; // 升级为 uint64_t 以完整支持新库的 64 位红外码
 };
 
 #define MAX_IR_LOGS 3
 static IRRecord irLogs[MAX_IR_LOGS];
 static int logCount = 0;
-
-void initIR() { IrReceiver.begin(IR_RECV_PIN, DISABLE_LED_FEEDBACK); }
 
 void handleIRDebuggerMode(int vry, int vrx, bool clicked) {
   // 1. 摇杆向左拨动快捷返回主菜单
@@ -32,28 +35,28 @@ void handleIRDebuggerMode(int vry, int vrx, bool clicked) {
   }
 
   // 3. 非阻塞流式红外信号检测轮询
-  if (IrReceiver.decode()) {
-    // 过滤掉红外协议中的长按连续重复帧 (Repeat Flag)，仅捕获有效单次按键
-    if (!(IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT)) {
+  decode_results results;
+  if (irrecv.decode(&results)) {
+    // 过滤掉红外协议中的长按连续重复帧 (repeat)，仅捕获有效单次按键
+    if (!results.repeat) {
 
       // 将旧的记录在队列中向下串联位移
       for (int i = MAX_IR_LOGS - 1; i > 0; i--) {
         irLogs[i] = irLogs[i - 1];
       }
 
-      // 压入最新的硬核解码数据
-      irLogs[0].protocolName =
-          getProtocolString(IrReceiver.decodedIRData.protocol);
-      irLogs[0].address = IrReceiver.decodedIRData.address;
-      irLogs[0].command = IrReceiver.decodedIRData.command;
-      irLogs[0].rawData = IrReceiver.decodedIRData.decodedRawData;
+      // 压入最新的硬件解码数据
+      irLogs[0].protocolType = results.decode_type;
+      irLogs[0].address = results.address;
+      irLogs[0].command = results.command;
+      irLogs[0].rawData = results.value; // results.value 在新库中为 uint64_t
 
       if (logCount < MAX_IR_LOGS) {
         logCount++;
       }
     }
-    // 释放锁存，使能下一次红外脉冲中断信号的接收
-    IrReceiver.resume();
+    // 释放锁存，使能下一次红外硬件 RMT 信号的接收
+    irrecv.resume();
   }
 
   // 4. UI 视窗渲染与高精排版
@@ -76,7 +79,8 @@ void handleIRDebuggerMode(int vry, int vrx, bool clicked) {
     // A. 顶部黄金区域：展示当前最新捕获的详细报文内容
     display.setCursor(2, 14);
     display.print(F("NEW: "));
-    display.print(irLogs[0].protocolName);
+    // 使用新库配套的 typeToString 函数将协议枚举实时转换为字符串
+    display.print(typeToString(irLogs[0].protocolType).c_str());
 
     char hexBuf[32];
     snprintf(hexBuf, sizeof(hexBuf), "A:0x%04X  C:0x%02X", irLogs[0].address,
@@ -84,7 +88,9 @@ void handleIRDebuggerMode(int vry, int vrx, bool clicked) {
     display.setCursor(2, 24);
     display.print(hexBuf);
 
-    snprintf(hexBuf, sizeof(hexBuf), "RAW: 0x%08X", irLogs[0].rawData);
+    // 针对 64 位数据进行安全的格式化输出
+    snprintf(hexBuf, sizeof(hexBuf), "RAW: 0x%llX",
+             (unsigned long long)irLogs[0].rawData);
     display.setCursor(2, 34);
     display.print(hexBuf);
 
