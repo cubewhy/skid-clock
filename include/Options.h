@@ -11,3 +11,8 @@
 // 跳一跳辅助线
 #define JJ_ENABLE_PROJ 0
 #endif // !JJ_ENABLE_PROJ
+
+#ifndef GMT_OFFSET
+// 时区 (用于 NTP 同步)
+#define GMT_OFFSET 8
+#endif // !GMT_OFFSET

@@ -1,11 +1,6 @@
 #include "../Config.h"
 #include "../Games.h"
-#if __has_include("Options.h")
 #include "Options.h"
-#define HAS_CUSTOM_OPTIONS 1
-#else
-#define HAS_CUSTOM_OPTIONS 0
-#endif
 
 enum JJState { JJ_IDLE, JJ_CHARGE, JJ_FLIGHT, JJ_SCROLL, JJ_GAMEOVER };
 static JJState jjState = JJ_IDLE;
