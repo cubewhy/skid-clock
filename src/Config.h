@@ -24,6 +24,8 @@
 #define BTN_BACK 26
 #define POT_PIN 34
 
+#define IR_RECV_PIN 5
+
 #define GITHUB_URL "github.com/cubewhy/skid-clock"
 #define IDLE_TIMEOUT 180000
 
@@ -64,6 +66,7 @@ enum SystemState {
   STATE_UNDERTALE,
   STATE_JUMPJUMP,
   STATE_FLAPPY,
+  STATE_IR_DEBUGGER,
 };
 
 enum PomoState { POMO_WORK, POMO_BREAK, POMO_PAUSE };

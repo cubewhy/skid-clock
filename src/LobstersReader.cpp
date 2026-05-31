@@ -34,7 +34,7 @@ static bool fetchHackerNewsRSS() {
   while (stream->connected() && newsItemCount < MAX_NEWS_ITEMS) {
     if (stream->find("<item>")) { // 定位到单条新闻载体
       if (stream->find("<title>")) {
-        String title = stream->readStringUntil('</title>');
+        String title = stream->readStringUntil('<');
 
         // 过滤转义常见 XML 网页符号
         title.replace("&amp;", "&");

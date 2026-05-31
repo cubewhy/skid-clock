@@ -58,6 +58,9 @@ void handleMainMenu(int vry, int vrx, bool clicked) {
     case 7:
       currentState = STATE_WIFI_MENU;
       break;
+    case 8:
+      currentState = STATE_IR_DEBUGGER;
+      break;
     }
     return;
   }

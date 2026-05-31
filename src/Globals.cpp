@@ -13,11 +13,11 @@ const int JOY_DELAY = 200;
 
 int currentMenuSelect = 0;
 int menuScrollTop = 0;
-const char *menuItems[] = {"1. Realtime Clock",  "2. Time Tools",
-                           "3. Arcade Games",    "4. Calculator",
-                           "5. Lobsters Reader", "6. Desktop Pet",
-                           "7. Adjust Settings", "8. WiFi Settings"};
-const int MENU_TOTAL = 8;
+const char *menuItems[] = {
+    "1. Realtime Clock",  "2. Time Tools",      "3. Arcade Games",
+    "4. Calculator",      "5. Lobsters Reader", "6. Desktop Pet",
+    "7. Adjust Settings", "8. WiFi Settings",   "9. IR Debugger"};
+const int MENU_TOTAL = 9;
 const int VISIBLE_ITEMS = 3;
 bool petEnteredViaTimeout = false;
 

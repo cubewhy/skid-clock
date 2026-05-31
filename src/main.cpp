@@ -1,5 +1,6 @@
 #include "Calculator.h"
 #include "Config.h"
+#include "DeveloperTools.h"
 #include "Games.h"
 #include "Keyboard.h"
 #include "LobstersReader.h"
@@ -23,6 +24,8 @@ void setup() {
 
   analogSetAttenuation(ADC_11db);
   Wire.begin(OLED_SDA, OLED_SCL);
+
+  initIR();
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("SSD1306 allocation failed"));
@@ -129,7 +132,8 @@ void loop() {
              currentState == STATE_SETTINGS || currentState == STATE_CLOCK ||
              currentState == STATE_TIMERS_MENU ||
              currentState == STATE_LOBSTERS_READER ||
-             currentState == STATE_WIFI_MENU)
+             currentState == STATE_WIFI_MENU ||
+             currentState == STATE_IR_DEBUGGER)
       currentState = STATE_MAIN_MENU;
     else if (currentState == STATE_MAIN_MENU)
       currentState = STATE_CLOCK;
@@ -228,6 +232,9 @@ void loop() {
     break;
   case STATE_PET:
     handlePetMode(vryVal, vrxVal, isClicked);
+    break;
+  case STATE_IR_DEBUGGER:
+    handleIRDebuggerMode(vryVal, vrxVal, isClicked);
     break;
   case STATE_TIMERS_MENU:
     handleTimersMenu(vryVal, vrxVal, isClicked);
