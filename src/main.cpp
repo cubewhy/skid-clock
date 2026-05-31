@@ -24,30 +24,62 @@ void processIRInput(int &vrx, int &vry, bool &clicked, bool &shortPress,
                     bool &anyInput) {
   decode_results results;
 
-  // 静态变量，用于记住上一次按下的是哪个键
-  static uint32_t lastValidCmd = 0;
+  // 1. 连续型按键（方向键）的状态维持变量
+  static uint32_t activeDir = 0;
+  static unsigned long lastDirTime = 0;
+  const unsigned long DIR_TIMEOUT = 180; // 180ms 内没有收到新信号则判定为释放
 
+  // 2. 返回键（BACK）长按/短按复合判定变量
+  static bool isBackHolding = false;
+  static unsigned long backStartTime = 0;
+  static unsigned long lastBackTime = 0;
+  const unsigned long BACK_LONG_PRESS_MS = 800; // 判定为长按的阈值（毫秒）
+  const unsigned long BACK_TIMEOUT = 200;       // 判定释放的超时时间（毫秒）
+
+  // 一、流式红外信号非阻塞轮询与分类
   if (irrecv.decode(&results)) {
-    uint32_t cmd = 0;
+    uint32_t cmd = results.command;
 
     if (results.repeat) {
-      // 1. 如果检测到是“重复帧”，说明用户正按住按键不放
-      // 此时 results.command 通常为空，我们直接沿用上一次记录的有效指令
-      cmd = lastValidCmd;
+      // A. 处理重复帧（按住不放时触发）
+      if (activeDir != 0) {
+        lastDirTime = millis(); // 延长方向键生命周期
+      }
+      if (isBackHolding) {
+        lastBackTime = millis(); // 延长返回键生命周期
+      }
     } else {
-      // 2. 如果是第一次按下的新物理按键
-      cmd = results.command;
-      lastValidCmd = cmd; // 刷新“最后一次有效指令”的记录
+      // B. 处理首次按下新按键
+      if (cmd == IR_REMOTE_CMD_UP || cmd == IR_REMOTE_CMD_DOWN ||
+          cmd == IR_REMOTE_CMD_LEFT || cmd == IR_REMOTE_CMD_RIGHT) {
+        activeDir = cmd;
+        lastDirTime = millis();
+      } else if (cmd == IR_REMOTE_CMD_OK) {
+        // OK 键采用单次触发模式（仅在首次按下时响应，屏蔽 repeat）
+        clicked = true;
+        anyInput = true;
+      } else if (cmd == IR_REMOTE_CMD_BACK) {
+        // 返回键按下：不立刻触发，进入时间监测机制
+        isBackHolding = true;
+        backStartTime = millis();
+        lastBackTime = millis();
+      }
     }
+    irrecv.resume();
+  }
 
-    // 3. 执行对应的模拟动作（无论是单次按下还是按住，都会进入这里）
-    switch (cmd) {
+  // 二、连续型按键（方向键）输出逻辑
+  if (activeDir != 0 && (millis() - lastDirTime >= DIR_TIMEOUT)) {
+    activeDir = 0; // 超时释放
+  }
+  if (activeDir != 0) {
+    switch (activeDir) {
     case IR_REMOTE_CMD_UP:
-      vry = 500; // 按住不放时，vry 会以约 110ms 的频率持续输出 500
+      vry = 500;
       anyInput = true;
       break;
     case IR_REMOTE_CMD_DOWN:
-      vry = 3500;
+      vry = 3500; // 持续保持下蹲，无闪烁
       anyInput = true;
       break;
     case IR_REMOTE_CMD_LEFT:
@@ -58,24 +90,23 @@ void processIRInput(int &vrx, int &vry, bool &clicked, bool &shortPress,
       vrx = 3500;
       anyInput = true;
       break;
-    case IR_REMOTE_CMD_OK:
-      // 注意：确认键通常不建议支持连发，防止误触发双击
-      if (!results.repeat) {
-        clicked = true;
-        anyInput = true;
-      }
-      break;
-    case IR_REMOTE_CMD_BACK:
-      if (!results.repeat) {
-        shortPress = true;
-        anyInput = true;
-      }
-      break;
-    default:
-      break;
     }
+  }
 
-    irrecv.resume();
+  // 三、返回键（BACK）长短按分流逻辑
+  if (isBackHolding) {
+    unsigned long heldDuration = millis() - backStartTime;
+
+    if (heldDuration >= BACK_LONG_PRESS_MS) {
+      // 【长按判定成功】：直接改写全局状态退出到主菜单，并清空检测状态
+      currentState = STATE_MAIN_MENU;
+      isBackHolding = false;
+    } else if (millis() - lastBackTime >= BACK_TIMEOUT) {
+      // 【短按判定成功】：只有当用户松开按键后（信号超时），才向系统发送单次返回指令
+      shortPress = true; // 仅在这一帧中生效一次，绝不连发
+      anyInput = true;
+      isBackHolding = false;
+    }
   }
 }
 
