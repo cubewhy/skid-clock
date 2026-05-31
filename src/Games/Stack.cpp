@@ -66,11 +66,7 @@ void handleStackMode(int vry, int vrx, bool clicked) {
     clicked = false;
   }
 
-  if (clicked) {
-    currentState = STATE_GAMES_MENU;
-    return;
-  }
-  if (joyMoved) {
+  if (joyMoved || clicked) {
     if (!joyMoveLatched && !stackIsFalling) {
       stackIsFalling = true;
       joyMoveLatched = true;
