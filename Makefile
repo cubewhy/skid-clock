@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -O3 -std=c++11 -pthread
+CXXFLAGS = -O3 -std=c++23 -pthread
 
 GEN_SRC = fk_level_generator.cpp
 GEN_BIN = ./fk_level_generator

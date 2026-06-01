@@ -1,392 +1,886 @@
 /*
  * fk_level_generator.cpp - Multi-threaded Level Generator for "Free The Key"
- * Optimized with Bitwise State Packing, Flat BFS Space Explorer, Simulated
- * Annealing, and Adaptive Constraint Relaxation.
  *
  * Original generator: https://github.com/fogleman/rush
  */
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
-#include <iomanip>
+#include <functional>
 #include <iostream>
 #include <mutex>
-#include <queue>
 #include <random>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 
-#define MAX_FK_BLOCKS 12
-#define GRID_SIZE 6
-#define BOARD_SIZE (GRID_SIZE * GRID_SIZE)
-#define PRIMARY_PIECE_ROW 2
-#define PRIMARY_PIECE_SIZE 2 // Reverted back to 1x2 key piece
-#define MAX_STATES_LIMIT 1500
+// Constants matching Go Engine Configuration
+constexpr int MAX_PIECES = 18;
+constexpr int GRID_SIZE = 6;
+constexpr int BOARD_SIZE = GRID_SIZE * GRID_SIZE;
+constexpr int PRIMARY_ROW = 2;
+constexpr int PRIMARY_SIZE = 2;
+constexpr int MAX_FK_BLOCKS = 12;
 
+// Model Structs
 struct Piece {
-  int8_t position;    // y * 6 + x
-  int8_t size;        // 2 or 3
-  int8_t orientation; // 0 for Horizontal, 1 for Vertical
+  int position; // y * Width + x
+  int size;
+  int orientation; // 0 = Horizontal, 1 = Vertical
+
+  int stride(int w) const { return (orientation == 0) ? 1 : w; }
+  int row(int w) const { return position / w; }
+  int col(int w) const { return position % w; }
 };
 
 struct Move {
-  int pieceIdx;
+  int piece;
   int steps;
+
+  int abs_steps() const { return (steps < 0) ? -steps : steps; }
 };
 
+// Memoization Key Structures matching Go implementation
+struct MemoKey {
+  std::array<int, MAX_PIECES> data;
+
+  MemoKey() { data.fill(0); }
+
+  bool operator==(const MemoKey &other) const { return data == other.data; }
+
+  bool less(const MemoKey &other, bool primary) const {
+    int i = primary ? 0 : 1;
+    for (; i < MAX_PIECES; ++i) {
+      if (data[i] != other.data[i]) {
+        return data[i] < other.data[i];
+      }
+    }
+    return false;
+  }
+};
+
+struct MemoKeyHash {
+  std::size_t operator()(const MemoKey &k) const {
+    std::size_t h = 0;
+    for (int x : k.data) {
+      h ^= std::hash<int>{}(x) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    }
+    return h;
+  }
+};
+
+// Memo class keeping track of searched states
+class Memo {
+public:
+  std::unordered_map<MemoKey, int, MemoKeyHash> data;
+  uint64_t hits = 0;
+
+  void clear() {
+    data.clear();
+    hits = 0;
+  }
+
+  int size() const { return data.size(); }
+
+  uint64_t get_hits() const { return hits; }
+
+  bool add(const MemoKey &key, int depth) {
+    hits++;
+    auto it = data.find(key);
+    if (it != data.end() && it->second >= depth) {
+      return false;
+    }
+    data[key] = depth;
+    return true;
+  }
+
+  void set(const MemoKey &key, int depth) { data[key] = depth; }
+};
+
+// Board structure maintaining puzzle state
 struct Board {
+  int width;
+  int height;
   std::vector<Piece> pieces;
-  bool occupied[BOARD_SIZE] = {false};
+  std::vector<int> walls;
+  std::vector<bool> occupied;
+  MemoKey memo_key;
 
-  void initEmpty() {
-    pieces.clear();
-    for (int i = 0; i < BOARD_SIZE; i++)
-      occupied[i] = false;
+  Board(int w, int h) : width(w), height(h), occupied(w * h, false) {
+    update_memo_key();
   }
 
-  int getStride(const Piece &p) const {
-    return (p.orientation == 0) ? 1 : GRID_SIZE;
+  Board()
+      : width(GRID_SIZE), height(GRID_SIZE),
+        occupied(GRID_SIZE * GRID_SIZE, false) {
+    update_memo_key();
   }
 
-  bool isOccupied(const Piece &p) const {
-    int idx = p.position;
-    int stride = getStride(p);
-    for (int i = 0; i < p.size; i++) {
-      if (idx < 0 || idx >= BOARD_SIZE || occupied[idx])
+  void update_memo_key() {
+    memo_key = MemoKey();
+    for (size_t i = 0; i < pieces.size() && i < MAX_PIECES; ++i) {
+      memo_key.data[i] = pieces[i].position;
+    }
+  }
+
+  Board copy() const {
+    Board b(width, height);
+    b.pieces = pieces;
+    b.walls = walls;
+    b.occupied = occupied;
+    b.memo_key = memo_key;
+    return b;
+  }
+
+  void sort_pieces() {
+    if (pieces.size() < 2)
+      return;
+    std::sort(
+        pieces.begin() + 1, pieces.end(),
+        [](const Piece &a, const Piece &b) { return a.position < b.position; });
+    update_memo_key();
+  }
+
+  bool is_occupied(const Piece &piece) const {
+    int idx = piece.position;
+    int st = piece.stride(width);
+    for (int i = 0; i < piece.size; ++i) {
+      if (occupied[idx]) {
         return true;
-      idx += stride;
+      }
+      idx += st;
     }
     return false;
   }
 
-  void setOccupied(const Piece &p, bool val) {
-    int idx = p.position;
-    int stride = getStride(p);
-    for (int i = 0; i < p.size; i++) {
-      if (idx >= 0 && idx < BOARD_SIZE)
-        occupied[idx] = val;
+  void set_occupied(const Piece &piece, bool value) {
+    int idx = piece.position;
+    int st = piece.stride(width);
+    for (int i = 0; i < piece.size; ++i) {
+      occupied[idx] = value;
+      idx += st;
+    }
+  }
+
+  void add_piece_raw(const Piece &piece) {
+    int i = pieces.size();
+    pieces.push_back(piece);
+    set_occupied(piece, true);
+    if (i < MAX_PIECES) {
+      memo_key.data[i] = piece.position;
+    }
+  }
+
+  bool add_piece(const Piece &piece) {
+    if (is_occupied(piece)) {
+      return false;
+    }
+    add_piece_raw(piece);
+    return true;
+  }
+
+  bool add_wall(int i) {
+    if (occupied[i]) {
+      return false;
+    }
+    walls.push_back(i);
+    occupied[i] = true;
+    return true;
+  }
+
+  void remove_piece(int i) {
+    set_occupied(pieces[i], false);
+    int j = pieces.size() - 1;
+    pieces[i] = pieces[j];
+    if (i < MAX_PIECES) {
+      memo_key.data[i] = pieces[i].position;
+    }
+    pieces.pop_back();
+    if (j < MAX_PIECES) {
+      memo_key.data[j] = 0;
+    }
+  }
+
+  void remove_last_piece() { remove_piece(pieces.size() - 1); }
+
+  void remove_wall(int i) {
+    occupied[walls[i]] = false;
+    walls[i] = walls.back();
+    walls.pop_back();
+  }
+
+  int target() const {
+    const auto &piece = pieces[0];
+    int r = piece.row(width);
+    return (r + 1) * width - piece.size;
+  }
+
+  std::vector<Move> get_moves() const {
+    std::vector<Move> moves;
+    for (size_t i = 0; i < pieces.size(); ++i) {
+      const auto &piece = pieces[i];
+      int stride = 0, reverse_steps = 0, forward_steps = 0;
+      if (piece.orientation == 1) { // Vertical
+        int y = piece.position / width;
+        reverse_steps = -y;
+        forward_steps = height - piece.size - y;
+        stride = width;
+      } else { // Horizontal
+        int x = piece.position % width;
+        reverse_steps = -x;
+        forward_steps = width - piece.size - x;
+        stride = 1;
+      }
+      // Reverse direction (negative steps)
+      int idx = piece.position - stride;
+      for (int steps = -1; steps >= reverse_steps; --steps) {
+        if (occupied[idx])
+          break;
+        moves.push_back({(int)i, steps});
+        idx -= stride;
+      }
+      // Forward direction (positive steps)
+      idx = piece.position + piece.size * stride;
+      for (int steps = 1; steps <= forward_steps; ++steps) {
+        if (occupied[idx])
+          break;
+        moves.push_back({(int)i, steps});
+        idx += stride;
+      }
+    }
+    return moves;
+  }
+
+  void do_move(const Move &move) {
+    auto &piece = pieces[move.piece];
+    int stride = piece.stride(width);
+
+    int idx = piece.position;
+    for (int i = 0; i < piece.size; ++i) {
+      occupied[idx] = false;
+      idx += stride;
+    }
+
+    piece.position += stride * move.steps;
+    if (move.piece < MAX_PIECES) {
+      memo_key.data[move.piece] = piece.position;
+    }
+
+    idx = piece.position;
+    for (int i = 0; i < piece.size; ++i) {
+      occupied[idx] = true;
       idx += stride;
     }
   }
 
-  bool addPiece(const Piece &p) {
-    if (isOccupied(p))
+  void undo_move(const Move &move) { do_move({move.piece, -move.steps}); }
+
+  bool validate() const {
+    if (width < 3 || height < 3)
       return false;
-    pieces.push_back(p);
-    setOccupied(p, true);
+    if (pieces.empty())
+      return false;
+    if (pieces.size() > MAX_PIECES)
+      return false;
+    if (pieces[0].orientation != 0)
+      return false;
+
+    std::vector<bool> test_occupied(width * height, false);
+    for (int w_idx : walls) {
+      if (w_idx < 0 || w_idx >= width * height)
+        return false;
+      if (test_occupied[w_idx])
+        return false;
+      test_occupied[w_idx] = true;
+    }
+
+    int primary_row = pieces[0].row(width);
+    for (size_t i = 0; i < pieces.size(); ++i) {
+      const auto &piece = pieces[i];
+      int r = piece.row(width);
+      int c = piece.col(width);
+
+      if (piece.size < 2)
+        return false;
+      if (i > 0 && piece.orientation == 0 && r == primary_row)
+        return false;
+
+      if (piece.orientation == 0) {
+        if (r < 0 || r >= height || c < 0 || c + piece.size > width)
+          return false;
+      } else {
+        if (c < 0 || c >= width || r < 0 || r + piece.size > height)
+          return false;
+      }
+
+      int idx = piece.position;
+      int stride = piece.stride(width);
+      for (int j = 0; j < piece.size; ++j) {
+        if (test_occupied[idx])
+          return false;
+        test_occupied[idx] = true;
+        idx += stride;
+      }
+    }
     return true;
   }
+};
 
-  void removePiece(int idx) {
-    setOccupied(pieces[idx], false);
-    pieces.erase(pieces.begin() + idx);
+// Static board analyzer to identify impossible positions early
+class StaticAnalyzer {
+public:
+  std::vector<bool> horz;
+  std::vector<bool> vert;
+  std::vector<int> positions;
+  std::vector<int> sizes;
+  std::vector<int> blocked;
+  std::vector<int> lens;
+  std::vector<int> idx;
+  std::vector<int> counts;
+  std::vector<int> result;
+  std::vector<std::vector<int>> placements;
+
+  StaticAnalyzer() {
+    int max_board_size = 16;
+    horz.resize(max_board_size * max_board_size, false);
+    vert.resize(max_board_size * max_board_size, false);
+    positions.resize(max_board_size);
+    sizes.resize(max_board_size);
+    blocked.resize(max_board_size);
+    lens.resize(max_board_size);
+    idx.resize(max_board_size);
+    counts.resize(max_board_size);
+    result.resize(max_board_size);
+    placements.resize(max_board_size, std::vector<int>(max_board_size));
+  }
+
+  bool impossible(const Board &board) {
+    analyze(board);
+    int w = board.width;
+    const auto &piece = board.pieces[0];
+    int i0 = piece.position + piece.size;
+    int i1 = (piece.row(w) + 1) * w;
+    for (int i = i0; i < i1; ++i) {
+      if (horz[i] || vert[i]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void analyze(const Board &board) {
+    std::fill(horz.begin(), horz.end(), false);
+    std::fill(vert.begin(), vert.end(), false);
+    for (int w_idx : board.walls) {
+      horz[w_idx] = true;
+      vert[w_idx] = true;
+    }
+    while (step(board)) {
+    }
+  }
+
+  bool step(const Board &board) {
+    bool changed = false;
+    int w = board.width;
+    int h = board.height;
+
+    for (int y = 0; y < h; ++y) {
+      positions.clear();
+      sizes.clear();
+      for (const auto &piece : board.pieces) {
+        if (piece.orientation == 0 && piece.row(w) == y) {
+          positions.push_back(piece.col(w));
+          sizes.push_back(piece.size);
+        }
+      }
+      if (positions.empty())
+        continue;
+
+      blocked.clear();
+      int i0 = y * w;
+      for (int i = 0; i < w; ++i) {
+        if (horz[i0 + i]) {
+          blocked.push_back(i);
+        }
+      }
+
+      std::vector<int> res =
+          compute_blocked_squares(w, positions, sizes, blocked);
+      for (int i : res) {
+        int idx_coord = i + i0;
+        if (!vert[idx_coord]) {
+          vert[idx_coord] = true;
+          changed = true;
+        }
+      }
+    }
+
+    for (int x = 0; x < w; ++x) {
+      positions.clear();
+      sizes.clear();
+      for (const auto &piece : board.pieces) {
+        if (piece.orientation == 1 && piece.col(w) == x) {
+          positions.push_back(piece.row(w));
+          sizes.push_back(piece.size);
+        }
+      }
+      if (positions.empty())
+        continue;
+
+      blocked.clear();
+      int i0 = x;
+      for (int i = 0; i < h; ++i) {
+        if (vert[i0 + i * w]) {
+          blocked.push_back(i);
+        }
+      }
+
+      std::vector<int> res =
+          compute_blocked_squares(h, positions, sizes, blocked);
+      for (int i : res) {
+        int idx_coord = i * w + x;
+        if (!horz[idx_coord]) {
+          horz[idx_coord] = true;
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+
+  std::vector<int> compute_blocked_squares(int w, std::vector<int> pos,
+                                           std::vector<int> sz,
+                                           const std::vector<int> &blk) {
+    int n = pos.size();
+    if (n == 0)
+      return {};
+
+    for (int i = 1; i < n; ++i) {
+      for (int j = i; j > 0 && pos[j] < pos[j - 1]; --j) {
+        std::swap(pos[j], pos[j - 1]);
+        std::swap(sz[j], sz[j - 1]);
+      }
+    }
+
+    lens.resize(n);
+    for (int i = 0; i < n; ++i) {
+      int p = pos[i];
+      int s = sz[i];
+      int x0 = 0;
+      int x1 = w - s;
+      for (int b : blk) {
+        if (b < p) {
+          x0 = std::max(x0, b + 1);
+        }
+        if (b > p) {
+          x1 = std::min(x1, b - s);
+        }
+      }
+      int d = x1 - x0 + 1;
+      if (d <= 0) {
+        return {}; // Impossible to place the pieces on this layout
+      }
+      for (int j = 0; j < d; ++j) {
+        placements[i][j] = x0 + j;
+      }
+      lens[i] = d;
+    }
+
+    int count = 0;
+    counts.assign(w, 0);
+    idx.assign(n, 0);
+
+    while (true) {
+      bool ok = true;
+      for (int i = 1; i < n; ++i) {
+        int j = i - 1;
+        if (placements[i][idx[i]] - placements[j][idx[j]] < sz[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) {
+        count++;
+        for (int i = 0; i < n; ++i) {
+          int p = placements[i][idx[i]];
+          int s = sz[i];
+          for (int j = 0; j < s; ++j) {
+            counts[p + j]++;
+          }
+        }
+      }
+
+      int i = n - 1;
+      for (; i >= 0 && idx[i] == lens[i] - 1; --i) {
+        idx[i] = 0;
+      }
+      if (i < 0) {
+        break;
+      }
+      idx[i]++;
+    }
+
+    result.clear();
+    for (int i = 0; i < w; ++i) {
+      if (counts[i] == count) {
+        result.push_back(i);
+      }
+    }
+    return result;
   }
 };
 
-// Pack board state into a compact 64-bit unsigned integer (6 bits per position)
-uint64_t getBoardKey(const Board &b) {
-  uint64_t key = 0;
-  int count = b.pieces.size() < 10 ? b.pieces.size() : 10;
-  for (int i = 0; i < count; i++) {
-    key |= ((uint64_t)(b.pieces[i].position & 0x3F)) << (i * 6);
-  }
-  return key;
-}
-
-Board reconstructBoard(const Board &template_board, uint64_t key) {
-  Board b = template_board;
-  for (size_t i = 0; i < b.pieces.size(); i++) {
-    b.pieces[i].position = (key >> (i * 6)) & 0x3F;
-  }
-  for (int i = 0; i < BOARD_SIZE; i++)
-    b.occupied[i] = false;
-  for (const auto &p : b.pieces) {
-    b.setOccupied(p, true);
-  }
-  return b;
-}
-
-void sortPiecesCanonical(Board &b) {
-  if (b.pieces.size() <= 2)
-    return;
-  std::sort(
-      b.pieces.begin() + 1, b.pieces.end(),
-      [](const Piece &x, const Piece &y) { return x.position < y.position; });
-}
-
-// Low-level register-friendly state expansion via bit manipulation
-std::vector<uint64_t> getNextStates(uint64_t state,
-                                    const std::vector<Piece> &pieces_template) {
-  bool occupied[BOARD_SIZE] = {false};
-  for (size_t idx = 0; idx < pieces_template.size(); idx++) {
-    const auto &p = pieces_template[idx];
-    int pos = (state >> (idx * 6)) & 0x3F;
-    int stride = (p.orientation == 0) ? 1 : GRID_SIZE;
-    for (int i = 0; i < p.size; i++) {
-      occupied[pos] = true;
-      pos += stride;
-    }
-  }
-
-  std::vector<uint64_t> next_states;
-  next_states.reserve(32);
-
-  for (size_t idx = 0; idx < pieces_template.size(); idx++) {
-    const auto &p = pieces_template[idx];
-    int pos = (state >> (idx * 6)) & 0x3F;
-    int px = pos % GRID_SIZE;
-    int py = pos / GRID_SIZE;
-
-    if (p.orientation == 0) { // Horizontal
-      // Slide Left
-      int tx = px - 1;
-      while (tx >= 0) {
-        int target_pos = py * GRID_SIZE + tx;
-        if (occupied[target_pos])
-          break;
-        uint64_t new_state = state;
-        new_state &= ~((uint64_t)0x3F << (idx * 6));
-        new_state |= ((uint64_t)target_pos << (idx * 6));
-        next_states.push_back(new_state);
-        tx--;
-      }
-      // Slide Right
-      tx = px + p.size;
-      while (tx < GRID_SIZE) {
-        int target_pos = py * GRID_SIZE + tx;
-        if (occupied[target_pos])
-          break;
-        int final_pos = py * GRID_SIZE + (tx - p.size + 1);
-        uint64_t new_state = state;
-        new_state &= ~((uint64_t)0x3F << (idx * 6));
-        new_state |= ((uint64_t)final_pos << (idx * 6));
-        next_states.push_back(new_state);
-        tx++;
-      }
-    } else { // Vertical
-      // Slide Up
-      int ty = py - 1;
-      while (ty >= 0) {
-        int target_pos = ty * GRID_SIZE + px;
-        if (occupied[target_pos])
-          break;
-        uint64_t new_state = state;
-        new_state &= ~((uint64_t)0x3F << (idx * 6));
-        new_state |= ((uint64_t)target_pos << (idx * 6));
-        next_states.push_back(new_state);
-        ty--;
-      }
-      // Slide Down
-      ty = py + p.size;
-      while (ty < GRID_SIZE) {
-        int target_pos = ty * GRID_SIZE + px;
-        if (occupied[target_pos])
-          break;
-        int final_pos = (ty - p.size + 1) * GRID_SIZE + px;
-        uint64_t new_state = state;
-        new_state &= ~((uint64_t)0x3F << (idx * 6));
-        new_state |= ((uint64_t)final_pos << (idx * 6));
-        next_states.push_back(new_state);
-        ty++;
-      }
-    }
-  }
-  return next_states;
-}
-
-struct ExplorerResult {
+// IDA* Solver matching the Go implementation
+struct Solution {
   bool solvable = false;
-  int maxMoves = 0;
-  Board hardestBoard;
+  std::vector<Move> moves;
+  int num_moves = 0;
+  int num_steps = 0;
+  int depth = 0;
+  int memo_size = 0;
+  uint64_t memo_hits = 0;
 };
 
-ExplorerResult exploreBoard(const Board &b) {
-  ExplorerResult res;
-  int primary_row = b.pieces[0].position / GRID_SIZE;
-  int target_pos = primary_row * GRID_SIZE + GRID_SIZE - b.pieces[0].size;
+class Solver {
+public:
+  Board *board_ptr = nullptr;
+  int target = 0;
+  Memo memo;
+  StaticAnalyzer *sa = nullptr;
+  std::vector<Move> path;
+  std::vector<std::vector<Move>> moves_buf;
 
-  uint64_t start_state = getBoardKey(b);
+  Solver(StaticAnalyzer *static_analyzer) : sa(static_analyzer) {}
 
-  // Forward BFS to build state space
-  std::unordered_map<uint64_t, int16_t> visited;
-  std::queue<uint64_t> q;
+  bool is_solved() const { return board_ptr->pieces[0].position == target; }
 
-  visited[start_state] = -1;
-  q.push(start_state);
-
-  while (!q.empty()) {
-    uint64_t cur = q.front();
-    q.pop();
-
-    if (visited.size() > MAX_STATES_LIMIT) {
-      return res; // Safety Limit
+  bool search(int depth_val, int max_depth, int previous_piece) {
+    int height = max_depth - depth_val;
+    if (height == 0) {
+      return is_solved();
     }
 
-    for (uint64_t nxt : getNextStates(cur, b.pieces)) {
-      if (visited.find(nxt) == visited.end()) {
-        visited[nxt] = -1;
-        q.push(nxt);
+    if (!memo.add(board_ptr->memo_key, height)) {
+      return false;
+    }
+
+    const auto &primary = board_ptr->pieces[0];
+    int i0 = primary.position + primary.size;
+    int i1 = target + primary.size - 1;
+    int min_moves = 0;
+    for (int i = i0; i <= i1; ++i) {
+      if (board_ptr->occupied[i]) {
+        min_moves++;
       }
     }
-  }
-
-  // Collect solved states
-  std::vector<uint64_t> solved_states;
-  for (const auto &pair : visited) {
-    int pos = pair.first & 0x3F;
-    if (pos == target_pos) {
-      solved_states.push_back(pair.first);
+    if (min_moves >= height) {
+      return false;
     }
-  }
 
-  if (solved_states.empty())
-    return res;
-
-  // Backward BFS from solved states
-  std::queue<uint64_t> bq;
-  for (uint64_t s : solved_states) {
-    visited[s] = 0;
-    bq.push(s);
-  }
-
-  while (!bq.empty()) {
-    uint64_t cur = bq.front();
-    int cur_dist = visited[cur];
-    bq.pop();
-
-    for (uint64_t nxt : getNextStates(cur, b.pieces)) {
-      auto it = visited.find(nxt);
-      if (it != visited.end() && it->second == -1) {
-        it->second = cur_dist + 1;
-        bq.push(nxt);
+    auto &buf = moves_buf[depth_val];
+    buf = board_ptr->get_moves();
+    for (const auto &move : buf) {
+      if (move.piece == previous_piece) {
+        continue;
+      }
+      board_ptr->do_move(move);
+      bool solved = search(depth_val + 1, max_depth, move.piece);
+      board_ptr->undo_move(move);
+      if (solved) {
+        memo.set(board_ptr->memo_key, height - 1);
+        path[depth_val] = move;
+        return true;
       }
     }
+    return false;
   }
 
-  int max_dist = -1;
-  uint64_t hardest_state = start_state;
-  for (const auto &pair : visited) {
-    if (pair.second > max_dist) {
-      max_dist = pair.second;
-      hardest_state = pair.first;
+  Solution solve_internal(Board &b, bool skip_checks) {
+    board_ptr = &b;
+    target = b.target();
+    memo.clear();
+
+    if (!skip_checks) {
+      if (!b.validate()) {
+        return Solution{};
+      }
+      if (sa && sa->impossible(b)) {
+        return Solution{};
+      }
+    }
+
+    if (is_solved()) {
+      return Solution{true, {}, 0, 0, 0, 0, 0};
+    }
+
+    int previous_memo_size = 0;
+    int no_change = 0;
+    int cutoff = b.width - b.pieces[0].size;
+
+    for (int i = 1;; ++i) {
+      path.assign(i, Move{});
+      moves_buf.resize(i);
+      if (search(0, i, -1)) {
+        int steps = 0;
+        for (const auto &m : path) {
+          steps += m.abs_steps();
+        }
+        return Solution{true, path,        (int)path.size(), steps,
+                        i,    memo.size(), memo.get_hits()};
+      }
+
+      int memo_size = memo.size();
+      if (memo_size == previous_memo_size) {
+        no_change++;
+      } else {
+        no_change = 0;
+      }
+      if (!skip_checks && no_change > cutoff) {
+        return Solution{false, {}, 0, 0, i, memo_size, memo.get_hits()};
+      }
+      previous_memo_size = memo_size;
     }
   }
 
-  if (max_dist >= 0) {
-    res.solvable = true;
-    res.maxMoves = max_dist;
-    res.hardestBoard = reconstructBoard(b, hardest_state);
-  }
-  return res;
-}
+  Solution solve(Board &b) { return solve_internal(b, false); }
 
-bool getRandomPiece(const Board &b, Piece &outPiece, std::mt19937 &rng) {
-  std::uniform_int_distribution<int> dist_size(2, 3);
-  std::uniform_int_distribution<int> dist_orientation(0, 1);
-  std::uniform_int_distribution<int> dist_coord(0, 5);
-
-  for (int attempt = 0; attempt < 80; attempt++) {
-    int size = dist_size(rng);
-    int orientation = dist_orientation(rng);
-    int x, y;
-    if (orientation == 0) { // Horizontal
-      x = dist_coord(rng) % (GRID_SIZE - size + 1);
-      y = dist_coord(rng);
-    } else { // Vertical
-      x = dist_coord(rng);
-      y = dist_coord(rng) % (GRID_SIZE - size + 1);
-    }
-
-    int pos = y * GRID_SIZE + x;
-    if (orientation == 0 && y == PRIMARY_PIECE_ROW)
-      continue; // Row 2 limitation to prevent blocking the key piece track
-
-    Piece p{(int8_t)pos, (int8_t)size, (int8_t)orientation};
-    if (!b.isOccupied(p)) {
-      outPiece = p;
-      return true;
-    }
-  }
-  return false;
-}
-
-struct MutationUndo {
-  enum Type { NONE, ADD, REMOVE, MOVE } type = NONE;
-  int pieceIdx;
-  Piece oldPiece;
-  uint64_t oldStateKey;
+  Solution unsafe_solve(Board &b) { return solve_internal(b, true); }
 };
 
-MutationUndo mutateBoard(Board &b, int max_pieces, std::mt19937 &rng) {
-  std::uniform_int_distribution<int> dist_choice(0, 5);
-  int choice = dist_choice(rng);
-  MutationUndo undo;
+// State Space Unsolver using flat heap-allocated BFS exploration to prevent
+// stack overflows
+class Unsolver {
+public:
+  Board board;
+  Solver solver;
+  Memo memo;
+  Board best_board;
+  Solution best_solution;
 
-  if (choice == 0) { // Add
-    if (b.pieces.size() < max_pieces) {
-      Piece p;
-      if (getRandomPiece(b, p, rng)) {
-        b.addPiece(p);
-        undo.type = MutationUndo::ADD;
-        undo.pieceIdx = b.pieces.size() - 1;
+  Unsolver(const Board &b, StaticAnalyzer *sa)
+      : board(b.copy()), solver(sa), best_board(b.copy()) {}
+
+  std::pair<Board, Solution> unsolve_internal(bool skip_checks) {
+    best_board = board.copy();
+    best_solution = solver.solve_internal(board, skip_checks);
+
+    if (!best_solution.solvable) {
+      return {best_board, best_solution};
+    }
+
+    // Flat, heap-allocated queue exploration replaces recursive DFS search
+    std::vector<Board> queue;
+    queue.push_back(board.copy());
+
+    memo.clear();
+    memo.add(board.memo_key, 0);
+
+    size_t head = 0;
+    while (head < queue.size()) {
+      Board cur = queue[head++];
+
+      Solution solution = solver.solve_internal(cur, skip_checks);
+
+      bool better = false;
+      int dNum_moves = solution.num_moves - best_solution.num_moves;
+      int dNum_steps = solution.num_steps - best_solution.num_steps;
+      if (dNum_moves >= 0) {
+        if (dNum_moves > 0) {
+          better = true;
+        } else if (dNum_moves == 0 && dNum_steps > 0) {
+          better = true;
+        } else if (dNum_moves == 0 && dNum_steps == 0 &&
+                   cur.memo_key.less(best_board.memo_key, true)) {
+          better = true;
+        }
+      }
+
+      if (better) {
+        best_solution = solution;
+        best_board = cur.copy();
+      }
+
+      std::vector<Move> moves = cur.get_moves();
+      for (const auto &move : moves) {
+        Board next_board = cur.copy();
+        next_board.do_move(move);
+        if (memo.add(next_board.memo_key, 0)) {
+          queue.push_back(next_board);
+        }
       }
     }
-  } else if (choice == 1) { // Remove
-    if (b.pieces.size() > 1) {
-      std::uniform_int_distribution<int> dist_idx(1, b.pieces.size() - 1);
-      int idx = dist_idx(rng);
-      undo.type = MutationUndo::REMOVE;
-      undo.oldPiece = b.pieces[idx];
-      undo.pieceIdx = idx;
-      b.removePiece(idx);
-    }
-  } else { // Move
-    uint64_t curr_state = getBoardKey(b);
-    auto next_states = getNextStates(curr_state, b.pieces);
-    if (!next_states.empty()) {
-      std::uniform_int_distribution<size_t> dist_state(0,
-                                                       next_states.size() - 1);
-      uint64_t selected_state = next_states[dist_state(rng)];
-      undo.type = MutationUndo::MOVE;
-      undo.oldStateKey = curr_state;
 
-      for (size_t i = 0; i < b.pieces.size(); i++) {
-        b.setOccupied(b.pieces[i], false);
-        b.pieces[i].position = (selected_state >> (i * 6)) & 0x3F;
-        b.setOccupied(b.pieces[i], true);
-      }
-    }
+    return {best_board, best_solution};
   }
-  return undo;
+
+  std::pair<Board, Solution> unsolve() { return unsolve_internal(false); }
+};
+
+// Simulation mutation framework matching model.go exactly
+inline int random_int(int low, int high, std::mt19937 &rng) {
+  std::uniform_int_distribution<int> dist(low, high);
+  return dist(rng);
 }
 
-void undoMutation(Board &b, const MutationUndo &undo) {
-  if (undo.type == MutationUndo::ADD) {
-    b.removePiece(undo.pieceIdx);
-  } else if (undo.type == MutationUndo::REMOVE) {
-    b.pieces.insert(b.pieces.begin() + undo.pieceIdx, undo.oldPiece);
-    b.setOccupied(undo.oldPiece, true);
-  } else if (undo.type == MutationUndo::MOVE) {
-    for (size_t i = 0; i < b.pieces.size(); i++) {
-      b.setOccupied(b.pieces[i], false);
-      b.pieces[i].position = (undo.oldStateKey >> (i * 6)) & 0x3F;
-      b.setOccupied(b.pieces[i], true);
+struct MutationResult {
+  std::function<void()> undo = nullptr;
+};
+
+MutationResult mutate_make_move(Board &board, std::mt19937 &rng) {
+  std::vector<Move> moves = board.get_moves();
+  if (moves.empty())
+    return {};
+  Move move = moves[random_int(0, moves.size() - 1, rng)];
+  board.do_move(move);
+  return {[&board, move]() { board.undo_move(move); }};
+}
+
+std::pair<Piece, bool> random_piece(const Board &board, int max_attempts,
+                                    std::mt19937 &rng) {
+  int w = board.width;
+  int h = board.height;
+  for (int i = 0; i < max_attempts; ++i) {
+    int size = 2 + random_int(0, 1, rng); // sizes 2 or 3
+    int orientation = random_int(0, 1, rng);
+    int x = 0, y = 0;
+    if (orientation == 1) { // Vertical
+      x = random_int(0, w - 1, rng);
+      y = random_int(0, h - size, rng);
+    } else { // Horizontal
+      x = random_int(0, w - size, rng);
+      y = random_int(0, h - 1, rng);
+    }
+    int position = y * w + x;
+    Piece p{position, size, orientation};
+    if (!board.is_occupied(p)) {
+      return {p, true};
+    }
+  }
+  return {Piece{}, false};
+}
+
+MutationResult mutate_add_piece(Board &board, int max_attempts,
+                                std::mt19937 &rng, int max_pieces_limit) {
+  if ((int)board.pieces.size() >= max_pieces_limit)
+    return {};
+  auto p_res = random_piece(board, max_attempts, rng);
+  if (!p_res.second)
+    return {};
+  int idx = board.pieces.size();
+  if (!board.add_piece(p_res.first)) {
+    return {};
+  }
+  return {[&board, idx]() { board.remove_piece(idx); }};
+}
+
+MutationResult mutate_remove_piece(Board &board, std::mt19937 &rng) {
+  if (board.pieces.size() < 2)
+    return {};
+  int i = random_int(1, board.pieces.size() - 1, rng);
+  Piece p = board.pieces[i];
+  board.remove_piece(i);
+  return {[&board, p]() { board.add_piece(p); }};
+}
+
+MutationResult mutate_remove_and_add_piece(Board &board, int max_attempts,
+                                           std::mt19937 &rng,
+                                           int max_pieces_limit) {
+  auto undo_remove = mutate_remove_piece(board, rng);
+  if (!undo_remove.undo)
+    return {};
+  auto undo_add = mutate_add_piece(board, max_attempts, rng, max_pieces_limit);
+  if (!undo_add.undo) {
+    return undo_remove;
+  }
+  return {[undo_add, undo_remove]() {
+    undo_add.undo();
+    undo_remove.undo();
+  }};
+}
+
+MutationResult mutate_board(Board &board, int max_attempts, std::mt19937 &rng,
+                            int max_pieces_limit) {
+  while (true) {
+    int choice = random_int(0, 9, rng);
+    MutationResult res;
+    if (choice == 0) {
+      res = mutate_add_piece(board, max_attempts, rng, max_pieces_limit);
+    } else if (choice == 1) {
+      res = mutate_remove_piece(board, rng);
+    } else if (choice == 2) {
+      res = mutate_remove_and_add_piece(board, max_attempts, rng,
+                                        max_pieces_limit);
+    } else {
+      res = mutate_make_move(board, rng);
+    }
+    if (res.undo) {
+      return res;
     }
   }
 }
 
-double getEnergy(const Board &b) {
-  ExplorerResult res = exploreBoard(b);
-  if (!res.solvable) {
+double compute_energy(Board &board, Solver &solver) {
+  Solution solution = solver.solve(board);
+  if (!solution.solvable) {
     return 1.0;
   }
-  return -res.maxMoves;
+  double e = (double)solution.num_moves;
+  e += (double)solution.num_steps / 100.0;
+  return -e;
 }
 
+// Simulated Annealing matching anneal.go
+Board anneal(Board state, double max_temp, double min_temp, int steps,
+             std::mt19937 &rng, int max_pieces_limit) {
+  double factor = -std::log(max_temp / min_temp);
+  Board current = state.copy();
+  Board best_state = state.copy();
+
+  StaticAnalyzer sa;
+  Solver solver(&sa);
+
+  double best_energy = compute_energy(current, solver);
+  double previous_energy = best_energy;
+  auto best_time = std::chrono::steady_clock::now();
+
+  std::uniform_real_distribution<double> dist_real(0.0, 1.0);
+
+  for (int step = 0; step < steps; ++step) {
+    double pct = (double)step / (double)(steps - 1);
+    double temp = max_temp * std::exp(factor * pct);
+
+    auto res = mutate_board(current, 100, rng, max_pieces_limit);
+    double energy = compute_energy(current, solver);
+    double change = energy - previous_energy;
+
+    if (change > 0 && std::exp(-change / temp) < dist_real(rng)) {
+      res.undo();
+    } else {
+      previous_energy = energy;
+      if (energy < best_energy) {
+        best_energy = energy;
+        best_state = current.copy();
+        best_time = std::chrono::steady_clock::now();
+      }
+    }
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                       std::chrono::steady_clock::now() - best_time)
+                       .count();
+    if (elapsed > 15) {
+      break;
+    }
+  }
+  return best_state;
+}
+
+// Task structuring
 struct LevelTask {
   int id;
   int min_pieces;
@@ -400,71 +894,46 @@ struct GeneratedLevel {
   int moves;
 };
 
-// Thread-Safe Level Generator Worker with Fallback Safety
-GeneratedLevel generateSingleLevel(const LevelTask &task, std::mt19937 &rng) {
-  int target_min_moves = task.min_moves;
-  int target_max_moves = task.max_moves;
-  int attempts = 0;
+GeneratedLevel generate_single_level(const LevelTask &task, std::mt19937 &rng) {
+  StaticAnalyzer sa;
+  Solver solver(&sa);
+
+  int current_min_moves = task.min_moves;
+  int current_max_moves = task.max_moves;
+  int cycle_count = 0;
 
   while (true) {
-    attempts++;
-
-    // Safety relaxation: if a specific high-difficulty target takes too long,
-    // slowly widen the scope to ensure threads complete task execution.
-    if (attempts > 300) {
-      if (target_min_moves > 11) {
-        target_min_moves--;
-      }
-      target_max_moves++;
-      attempts = 0;
+    cycle_count++;
+    if (cycle_count > 150) {
+      if (current_min_moves > 5)
+        current_min_moves -= 3;
+      current_max_moves += 5;
+      cycle_count = 0;
     }
 
-    Board board;
-    board.initEmpty();
-    Piece key_piece{PRIMARY_PIECE_ROW * GRID_SIZE, PRIMARY_PIECE_SIZE, 0};
-    board.addPiece(key_piece);
+    Board board(GRID_SIZE, GRID_SIZE);
+    board.add_piece(Piece{PRIMARY_ROW * GRID_SIZE, PRIMARY_SIZE, 0});
 
-    std::uniform_int_distribution<int> dist_pieces(task.min_pieces,
-                                                   task.max_pieces);
-    int target_pieces = dist_pieces(rng);
-
-    Board best_board = board;
-    double max_temp = 20.0;
+    double max_temp = 22.0;
     double min_temp = 0.5;
-    int steps = 150;
-    double factor = -std::log(max_temp / min_temp);
+    int annealing_steps = (task.min_moves >= 60) ? 600 : 200;
 
-    double curr_energy = getEnergy(board);
-    double prev_energy = curr_energy;
+    board = anneal(board, max_temp, min_temp, annealing_steps, rng,
+                   task.max_pieces);
 
-    for (int step = 0; step < steps; step++) {
-      double pct = (steps > 1) ? (double)step / (steps - 1) : 0;
-      double temp = max_temp * std::exp(factor * pct);
+    Unsolver unsolver(board, &sa);
+    auto unsolve_result = unsolver.unsolve();
+    Board final_board = unsolve_result.first;
+    Solution final_solution = unsolve_result.second;
 
-      MutationUndo undo = mutateBoard(board, target_pieces, rng);
-      if (undo.type == MutationUndo::NONE)
-        continue;
+    int p_count = (int)final_board.pieces.size();
 
-      double energy = getEnergy(board);
-      double change = energy - prev_energy;
-
-      if (change > 0 &&
-          std::exp(-change / temp) < ((double)rng() / rng.max())) {
-        undoMutation(board, undo);
-      } else {
-        prev_energy = energy;
-        if (energy < curr_energy) {
-          curr_energy = energy;
-          best_board = board;
-        }
-      }
-    }
-
-    ExplorerResult res = exploreBoard(best_board);
-    if (res.solvable && res.maxMoves >= target_min_moves &&
-        res.maxMoves <= target_max_moves) {
-      sortPiecesCanonical(res.hardestBoard);
-      return {res.hardestBoard, res.maxMoves};
+    if (final_solution.solvable && p_count >= task.min_pieces &&
+        p_count <= task.max_pieces &&
+        final_solution.num_moves >= current_min_moves &&
+        final_solution.num_moves <= current_max_moves) {
+      final_board.sort_pieces();
+      return {final_board, final_solution.num_moves};
     }
   }
 }
@@ -472,156 +941,146 @@ GeneratedLevel generateSingleLevel(const LevelTask &task, std::mt19937 &rng) {
 int main() {
   std::cout << "=================================================="
             << std::endl;
-  std::cout << "      Starting Native C++ Thread Level Generator  "
-            << std::endl;
-  std::cout << "         (1x2 Key Piece & Steps > 10 Mode)        "
+  std::cout << "                Level Generator                   "
             << std::endl;
   std::cout << "=================================================="
             << std::endl;
 
-  // Level configuration supporting high difficulty targets (> 10 moves)
   std::vector<LevelTask> tasks;
   for (int i = 1; i <= 100; i++) {
-    if (i <= 25) {
-      tasks.push_back({i, 4, 5, 11, 14}); // Moderate: 11-14 moves
-    } else if (i <= 50) {
-      tasks.push_back({i, 5, 6, 15, 19}); // Hard: 15-19 moves
-    } else if (i <= 75) {
-      tasks.push_back({i, 6, 7, 20, 25}); // Very Hard: 20-25 moves
-    } else {
-      tasks.push_back({i, 7, 8, 26, 38}); // Expert: 26-38 moves
-    }
+    if (i <= 10)
+      tasks.push_back({i, 4, 5, 10, 15});
+    else if (i <= 45)
+      tasks.push_back({i, 5, 7, 16, 20});
+    else
+      tasks.push_back({i, 6, 9, 21, 55});
   }
 
-  std::vector<GeneratedLevel> final_levels(100);
-  std::atomic<int> next_task_idx(0);
-  std::atomic<int> completed_tasks(0);
-  std::mutex cout_mutex;
+  std::vector<GeneratedLevel> results(100);
+  std::atomic<int> shared_task_index(0);
+  std::atomic<int> output_counter(0);
+  std::mutex tracking_mutex;
 
-  unsigned int num_threads = std::thread::hardware_concurrency();
-  if (num_threads == 0)
-    num_threads = 4;
-  std::cout << "Detected " << num_threads
-            << " CPU cores. Running in parallel..." << std::endl;
+  unsigned int total_workers = std::thread::hardware_concurrency();
+  if (total_workers == 0)
+    total_workers = 4;
+  std::cout << "Launching parallel execution threads: " << total_workers
+            << std::endl;
 
-  auto start_time = std::chrono::high_resolution_clock::now();
+  auto calculation_start = std::chrono::high_resolution_clock::now();
+  std::vector<std::thread> operational_pool;
 
-  std::vector<std::thread> workers;
-  for (unsigned int t = 0; t < num_threads; t++) {
-    workers.emplace_back([&, t]() {
-      std::random_device rd;
-      std::mt19937 rng(rd() + t);
+  for (unsigned int worker_id = 0; worker_id < total_workers; worker_id++) {
+    operational_pool.emplace_back([&, worker_id]() {
+      auto timestamp =
+          std::chrono::high_resolution_clock::now().time_since_epoch().count();
+      std::mt19937 engine(static_cast<unsigned int>(timestamp) +
+                          worker_id * 73856093);
 
       while (true) {
-        int task_idx = next_task_idx.fetch_add(1);
-        if (task_idx >= 100)
+        int target_id = shared_task_index.fetch_add(1);
+        if (target_id >= 100)
           break;
 
-        GeneratedLevel lvl = generateSingleLevel(tasks[task_idx], rng);
-        final_levels[task_idx] = lvl;
+        results[target_id] = generate_single_level(tasks[target_id], engine);
+        int progress = output_counter.fetch_add(1) + 1;
 
-        int done = completed_tasks.fetch_add(1) + 1;
-        {
-          std::lock_guard<std::mutex> lock(cout_mutex);
-          std::cout << "\rProgress: " << done
-                    << "/100 levels successfully generated." << std::flush;
-        }
+        std::lock_guard<std::mutex> system_lock(tracking_mutex);
+        std::cout << "\rProcessing Map Pipeline: " << progress
+                  << "/100 steps completed." << std::flush;
       }
     });
   }
 
-  for (auto &w : workers) {
-    w.join();
+  for (auto &worker : operational_pool) {
+    worker.join();
   }
 
-  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                     std::chrono::high_resolution_clock::now() - start_time)
-                     .count();
+  auto calculation_end = std::chrono::high_resolution_clock::now();
+  double execution_seconds =
+      std::chrono::duration_cast<std::chrono::milliseconds>(calculation_end -
+                                                            calculation_start)
+          .count() /
+      1000.0;
 
-  std::cout << "\n\nAll levels generated in " << (double)elapsed / 1000.0
+  std::cout << "\n\nMap Matrix acquired in: " << execution_seconds
             << " seconds." << std::endl;
-  std::cout << "Sorting levels by ascending difficulty (move counts)..."
-            << std::endl;
+  std::cout << "Sorting output by optimal move distribution..." << std::endl;
 
-  // Sort generated database by move counts
-  std::sort(final_levels.begin(), final_levels.end(),
+  std::sort(results.begin(), results.end(),
             [](const GeneratedLevel &a, const GeneratedLevel &b) {
               return a.moves < b.moves;
             });
 
-  std::cout << "Writing static 'include/FKLevels.h' database..." << std::endl;
+  std::cout << "Writing static map array code into include/FKLevels.h..."
+            << std::endl;
 
-  std::ofstream out("include/FKLevels.h");
-  out << "/*\n";
-  out << " * FKLevels.h - Static Prebuilt Levels Header Database\n";
-  out << " * Generated natively on PC with Simulated Annealing & BFS Solver.\n";
-  out << " * Sorted in ascending order of optimal moves (difficulty).\n";
-  out << " */\n\n";
-  out << "#ifndef LEVELS_H\n";
-  out << "#define LEVELS_H\n\n";
-  out << "#include <Arduino.h>\n\n";
-  out << "#ifndef MAX_FK_BLOCKS\n";
-  out << "#define MAX_FK_BLOCKS 12\n";
-  out << "#endif\n\n";
-  out << "struct FKBlock {\n";
-  out << "  int8_t x, y;\n";
-  out << "  int8_t w, h;\n";
-  out << "  bool isKey;\n";
-  out << "  bool active;\n";
-  out << "};\n\n";
-  out << "struct PrebuiltLevel {\n";
-  out << "  uint8_t blockCount;\n";
-  out << "  uint8_t minMoves;\n";
-  out << "  FKBlock blocks[MAX_FK_BLOCKS];\n";
-  out << "};\n\n";
-  out << "const PrebuiltLevel PREBUILT_LEVELS[100] PROGMEM = {\n";
+  std::system("mkdir -p include");
 
-  for (size_t idx = 0; idx < final_levels.size(); idx++) {
-    const auto &lvl = final_levels[idx];
-    out << "  {\n";
-    out << "    " << lvl.board.pieces.size() << ", // Level " << idx + 1
-        << " vehicle count\n";
-    out << "    " << lvl.moves << ", // Optimal moves to solve\n";
-    out << "    {\n";
+  std::ofstream file_stream("include/FKLevels.h");
+  file_stream << "/*\n"
+              << " * FKLevels.h - Static Prebuilt Levels Header Database\n"
+              << " * Sorted in ascending order of optimal moves (difficulty).\n"
+              << " */\n\n"
+              << "#ifndef LEVELS_H\n"
+              << "#define LEVELS_H\n\n"
+              << "#include <Arduino.h>\n\n"
+              << "#ifndef MAX_FK_BLOCKS\n"
+              << "#define MAX_FK_BLOCKS 12\n"
+              << "#endif\n\n"
+              << "struct FKBlock {\n"
+              << "  int8_t x, y;\n"
+              << "  int8_t w, h;\n"
+              << "  bool isKey;\n"
+              << "  bool active;\n"
+              << "};\n\n"
+              << "struct PrebuiltLevel {\n"
+              << "  uint8_t blockCount;\n"
+              << "  uint8_t minMoves;\n"
+              << "  FKBlock blocks[MAX_FK_BLOCKS];\n"
+              << "};\n\n"
+              << "const PrebuiltLevel PREBUILT_LEVELS[100] PROGMEM = {\n";
 
-    for (size_t p_idx = 0; p_idx < lvl.board.pieces.size(); p_idx++) {
-      const auto &p = lvl.board.pieces[p_idx];
-      int w = (p.orientation == 0) ? p.size : 1;
-      int h = (p.orientation == 0) ? 1 : p.size;
-      std::string is_key = (p_idx == 0) ? "true" : "false";
-      int px = p.position % GRID_SIZE;
-      int py = p.position / GRID_SIZE;
+  for (size_t map_idx = 0; map_idx < results.size(); map_idx++) {
+    const auto &level = results[map_idx];
+    file_stream << "  {\n"
+                << "    " << level.board.pieces.size() << ", // Level "
+                << map_idx + 1 << " total items\n"
+                << "    " << level.moves << ", // Minimum moves required\n"
+                << "    {\n";
 
-      out << "      {" << px << ", " << py << ", " << w << ", " << h << ", "
-          << is_key << ", true}";
-      if (p_idx < lvl.board.pieces.size() - 1 ||
-          lvl.board.pieces.size() < MAX_FK_BLOCKS) {
-        out << ",";
+    for (size_t block_idx = 0; block_idx < level.board.pieces.size();
+         block_idx++) {
+      const auto &block = level.board.pieces[block_idx];
+      int width = (block.orientation == 0) ? block.size : 1;
+      int height = (block.orientation == 0) ? 1 : block.size;
+      std::string identity = (block_idx == 0) ? "true" : "false";
+      int grid_x = block.position % GRID_SIZE;
+      int grid_y = block.position / GRID_SIZE;
+
+      file_stream << "      {" << grid_x << ", " << grid_y << ", " << width
+                  << ", " << height << ", " << identity << ", true}";
+      if (block_idx < level.board.pieces.size() - 1 ||
+          level.board.pieces.size() < MAX_FK_BLOCKS) {
+        file_stream << ",";
       }
-      out << " // Car " << p_idx << "\n";
+      file_stream << " // Entity " << block_idx << "\n";
     }
 
-    // Fill remaining inactive blocks up to MAX_FK_BLOCKS (12)
-    for (int empty_idx = lvl.board.pieces.size(); empty_idx < MAX_FK_BLOCKS;
-         empty_idx++) {
-      out << "      {0, 0, 0, 0, false, false}";
-      if (empty_idx < MAX_FK_BLOCKS - 1) {
-        out << ",";
-      }
-      out << "\n";
+    for (int filler_idx = level.board.pieces.size(); filler_idx < MAX_FK_BLOCKS;
+         filler_idx++) {
+      file_stream << "      {0, 0, 0, 0, false, false}";
+      if (filler_idx < MAX_FK_BLOCKS - 1)
+        file_stream << ",";
+      file_stream << "\n";
     }
 
-    out << "    }\n";
-    if (idx < 99) {
-      out << "  },\n";
-    } else {
-      out << "  }\n";
-    }
+    file_stream << "    }\n";
+    file_stream << (map_idx < 99 ? "  },\n" : "  }\n");
   }
-  out << "};\n\n";
-  out << "#endif\n";
+  file_stream << "};\n\n#endif\n";
+  file_stream.close();
 
-  out.close();
-  std::cout << "Export complete! Done." << std::endl;
+  std::cout << "Header compilation successful! System ready." << std::endl;
   return 0;
 }
