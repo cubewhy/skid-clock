@@ -8,6 +8,7 @@
 
 static Point snake[SNAKE_MAX_LEN];
 static int snakeLength = 3;
+static int score = 0;
 static SnakeDirection snakeDir = SNAKE_RIGHT;
 static SnakeDirection lastExecutedDir = SNAKE_RIGHT;
 static Point food;
@@ -79,7 +80,7 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
     display.setTextSize(1);
     display.setCursor(10, 35);
     display.print(F("Score: "));
-    display.println(snakeLength - 3);
+    display.println(score);
     display.setCursor(10, 50);
     display.println(F("[Click] return Menu"));
     display.display(); // 确保渲染物理屏幕
@@ -148,8 +149,9 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
       for (int g = 0; g < growFactor; g++) {
         if (snakeLength < SNAKE_MAX_LEN) {
           snake[snakeLength] = oldTail;
-          snakeLength++;
+          ++snakeLength;
         }
+        ++score;
       }
       spawnFood();
     }
@@ -163,7 +165,7 @@ void handleSnakeMode(int vry, int vrx, bool clicked) {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.print(F("Score: "));
-  display.print(snakeLength - 3);
+  display.print(score);
 
   // 绘制蛇体
   for (int i = 0; i < snakeLength; i++) {
