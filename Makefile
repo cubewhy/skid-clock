@@ -22,7 +22,7 @@ build: generate
 	@echo ">>> Compiling firmware via PlatformIO..."
 	pio run
 
-upload: generate
+upload:
 	@echo ">>> Flashing firmware to ESP32..."
 	pio run --target upload
 
