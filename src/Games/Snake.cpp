@@ -58,12 +58,13 @@ static void spawnFood() {
 }
 
 void initSnakeGame() {
+  score = 0;
   snakeLength = 3;
   snake[0] = {15, 8};
   snake[1] = {14, 8};
   snake[2] = {13, 8};
   snakeDir = SNAKE_RIGHT;
-  lastExecutedDir = SNAKE_RIGHT; // 初始化方向锁
+  lastExecutedDir = SNAKE_RIGHT;
   isGameOver = false;
   spawnFood();
 }
