@@ -37,7 +37,6 @@ static uint8_t currentTotalWalls = 0;
 static TroubleBullet tkBullets[MAX_TRBL_BULLETS];
 static TroubleEnemy tkEnemy;
 
-// 👈 优化：将出生点移至完全远离隔断墙的绝对几何安全口袋阵中
 static float playerX = 11.0f;
 static float playerY = 52.0f;
 static int tkScore = 0;
@@ -45,6 +44,7 @@ static bool tkGameOver = false;
 
 static unsigned long lastPlayerFire = 0;
 static unsigned long lastTkTick = 0;
+static uint8_t aiDetourTicks = 0;
 
 // 光线投射射线视线遮挡算法
 static bool checkLineOfSight(float ax, float ay, float bx, float by) {
@@ -118,15 +118,15 @@ static void respawnEnemy() {
   tkEnemy.turretAngle = 0.0f;
   tkEnemy.sweepDir = 1.0f;
   tkEnemy.stuckFrames = 0;
+  aiDetourTicks = 0;
 
-  // 永远降生在离玩家最远的对角线黄金口袋区 (X=116, Y=20 绝对安全)
   tkEnemy.x = (playerX > 64.0f) ? 11.0f : 116.0f;
   tkEnemy.y = 20.0f;
   tkEnemy.lastX = tkEnemy.x;
   tkEnemy.lastY = tkEnemy.y;
 
-  tkEnemy.targetX = random(20, 110);
-  tkEnemy.targetY = random(18, 56);
+  tkEnemy.targetX = playerX;
+  tkEnemy.targetY = playerY;
 }
 
 void initTankTroubleGame() {
@@ -168,34 +168,46 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked) {
   if (dt > 3.0f)
     dt = 3.0f;
 
-  // 1. 玩家移动与 activeMaze 墙体裁剪阻挡
   float moveSpeed = 1.2f * dt;
-  float nextPX = playerX;
-  float nextPY = playerY;
 
+  float nextPX = playerX;
   if (vrx < 1000)
     nextPX -= moveSpeed;
   else if (vrx > 3000)
     nextPX += moveSpeed;
+
+  for (int w = 0; w < currentTotalWalls; w++) {
+    if (activeMaze[w].isVertical) {
+      if (playerY >= activeMaze[w].y1 - 4 && playerY <= activeMaze[w].y2 + 4) {
+        if (abs(nextPX - activeMaze[w].x1) < 5) {
+          if (playerX < activeMaze[w].x1)
+            nextPX = activeMaze[w].x1 - 5;
+          else
+            nextPX = activeMaze[w].x1 + 5;
+        }
+      }
+    }
+  }
+  playerX = nextPX;
+
+  float nextPY = playerY;
   if (vry < 1000)
     nextPY -= moveSpeed;
   else if (vry > 3000)
     nextPY += moveSpeed;
 
   for (int w = 0; w < currentTotalWalls; w++) {
-    if (activeMaze[w].isVertical) {
-      if (nextPY >= activeMaze[w].y1 - 4 && nextPY <= activeMaze[w].y2 + 4) {
-        if (abs(nextPX - activeMaze[w].x1) < 5)
-          nextPX = playerX;
-      }
-    } else {
-      if (nextPX >= activeMaze[w].x1 - 4 && nextPX <= activeMaze[w].x2 + 4) {
-        if (abs(nextPY - activeMaze[w].y1) < 5)
-          nextPY = playerY;
+    if (!activeMaze[w].isVertical) {
+      if (playerX >= activeMaze[w].x1 - 4 && playerX <= activeMaze[w].x2 + 4) {
+        if (abs(nextPY - activeMaze[w].y1) < 5) {
+          if (playerY < activeMaze[w].y1)
+            nextPY = activeMaze[w].y1 - 5;
+          else
+            nextPY = activeMaze[w].y1 + 5;
+        }
       }
     }
   }
-  playerX = nextPX;
   playerY = nextPY;
 
   // 2. 旋钮控自机炮塔
@@ -209,7 +221,7 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked) {
       if (!tkBullets[i].active) {
         tkBullets[i].active = true;
         tkBullets[i].bouncesLeft = 5;
-        tkBullets[i].fromEnemy = false; // 👈 标记：玩家子弹
+        tkBullets[i].fromEnemy = false;
         tkBullets[i].x = playerX + cos(aimAngle) * 6.0f;
         tkBullets[i].y = playerY + sin(aimAngle) * 6.0f;
         tkBullets[i].vx = cos(aimAngle) * 2.6f;
@@ -264,10 +276,6 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked) {
       continue;
     }
 
-    // --- ✨【核心碰撞逻辑重构：首弹防贴脸伤害机制】---
-
-    // A.
-    // 击中自机玩家：只有在（子弹是敌人发出来的）或者（自己发出来的子弹至少反弹过一次，即剩余次数小于5）时才触发暴毙
     if (tkBullets[i].fromEnemy || tkBullets[i].bouncesLeft < 5) {
       float dToPlayer =
           pow(tkBullets[i].x - playerX, 2) + pow(tkBullets[i].y - playerY, 2);
@@ -278,7 +286,6 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked) {
       }
     }
 
-    // B. 击中敌人 AI：同理，如果是 AI 自己打出来的子弹且没有反弹过，免伤放行！
     if (tkEnemy.active) {
       if (!tkBullets[i].fromEnemy || tkBullets[i].bouncesLeft < 5) {
         float dToEnemy = pow(tkBullets[i].x - tkEnemy.x, 2) +
@@ -294,11 +301,9 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 5. 🤖 战术型人机 AI 驱动状态机
   if (tkEnemy.active) {
     bool seePlayer = checkLineOfSight(tkEnemy.x, tkEnemy.y, playerX, playerY);
 
-    // AI 贴墙拐角防粘连卡死
     if (abs(tkEnemy.x - tkEnemy.lastX) < 0.04f &&
         abs(tkEnemy.y - tkEnemy.lastY) < 0.04f) {
       tkEnemy.stuckFrames++;
@@ -306,6 +311,7 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked) {
         tkEnemy.targetX = random(20, 110);
         tkEnemy.targetY = random(18, 56);
         tkEnemy.stuckFrames = 0;
+        aiDetourTicks = 35;
       }
     } else {
       tkEnemy.stuckFrames = 0;
@@ -313,47 +319,107 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked) {
     tkEnemy.lastX = tkEnemy.x;
     tkEnemy.lastY = tkEnemy.y;
 
+    if (!seePlayer) {
+      if (aiDetourTicks > 0) {
+        aiDetourTicks--;
+      } else {
+        tkEnemy.targetX = playerX;
+        tkEnemy.targetY = playerY;
+      }
+    }
+
     float edx = (seePlayer ? playerX : tkEnemy.targetX) - tkEnemy.x;
     float edy = (seePlayer ? playerY : tkEnemy.targetY) - tkEnemy.y;
     float eDist = sqrt(edx * edx + edy * edy);
 
     if (eDist < 4.0f && !seePlayer) {
-      tkEnemy.targetX = random(20, 110);
-      tkEnemy.targetY = random(18, 56);
+      aiDetourTicks = 0;
+      tkEnemy.targetX = playerX;
+      tkEnemy.targetY = playerY;
     } else if (eDist > 1.0f) {
       float enemySpeed = (seePlayer ? 0.85f : 0.55f) * dt;
-      float eNextX = tkEnemy.x + (edx / eDist) * enemySpeed;
-      float eNextY = tkEnemy.y + (edy / eDist) * enemySpeed;
+      float dirX = edx / eDist;
+      float dirY = edy / eDist;
 
+      float eNextX = tkEnemy.x + dirX * enemySpeed;
       for (int w = 0; w < currentTotalWalls; w++) {
         if (activeMaze[w].isVertical) {
-          if (eNextY >= activeMaze[w].y1 - 4 &&
-              eNextY <= activeMaze[w].y2 + 4) {
-            if (abs(eNextX - activeMaze[w].x1) < 5)
-              eNextX = tkEnemy.x;
-          }
-        } else {
-          if (eNextX >= activeMaze[w].x1 - 4 &&
-              eNextX <= activeMaze[w].x2 + 4) {
-            if (abs(eNextY - activeMaze[w].y1) < 5)
-              eNextY = tkEnemy.y;
+          if (tkEnemy.y >= activeMaze[w].y1 - 4 &&
+              tkEnemy.y <= activeMaze[w].y2 + 4) {
+            if (abs(eNextX - activeMaze[w].x1) < 5) {
+              if (tkEnemy.x < activeMaze[w].x1)
+                eNextX = activeMaze[w].x1 - 5;
+              else
+                eNextX = activeMaze[w].x1 + 5;
+            }
           }
         }
       }
       tkEnemy.x = eNextX;
+
+      float eNextY = tkEnemy.y + dirY * enemySpeed;
+      for (int w = 0; w < currentTotalWalls; w++) {
+        if (!activeMaze[w].isVertical) {
+          if (tkEnemy.x >= activeMaze[w].x1 - 4 &&
+              tkEnemy.x <= activeMaze[w].x2 + 4) {
+            if (abs(eNextY - activeMaze[w].y1) < 5) {
+              if (tkEnemy.y < activeMaze[w].y1)
+                eNextY = activeMaze[w].y1 - 5;
+              else
+                eNextY = activeMaze[w].y1 + 5;
+            }
+          }
+        }
+      }
       tkEnemy.y = eNextY;
     }
 
-    // AI 战术火控系统
     if (seePlayer) {
-      tkEnemy.turretAngle = atan2(playerY - tkEnemy.y, playerX - tkEnemy.x);
-      if (now - tkEnemy.lastShot > 800) {
+      // 计算当前应当瞄准玩家的理想绝对目标角度
+      float targetAngle = atan2(playerY - tkEnemy.y, playerX - tkEnemy.x);
+
+      // 计算当前炮塔角度与理想目标角度的相对差值
+      float angleDiff = targetAngle - tkEnemy.turretAngle;
+
+      // 周期归一化：将夹角缩放到 (-PI, PI] 区间，确保 AI 总是选择最短的路径转头
+      while (angleDiff < -M_PI)
+        angleDiff += 2.0f * M_PI;
+      while (angleDiff > M_PI)
+        angleDiff -= 2.0f * M_PI;
+
+      // 定义 AI 炮塔旋转的帧速度 (数值越大转得越快)
+      float maxRotation = 0.07f * dt;
+
+      if (abs(angleDiff) <= maxRotation) {
+        tkEnemy.turretAngle = targetAngle; // 角度极小，直接锁定目标
+      } else {
+        // 带有渐变过渡地向目标角度微调
+        tkEnemy.turretAngle += (angleDiff > 0 ? maxRotation : -maxRotation);
+      }
+
+      // 再次计算更新后的残余夹角
+      float currentDiff = targetAngle - tkEnemy.turretAngle;
+      while (currentDiff < -M_PI)
+        currentDiff += 2.0f * M_PI;
+      while (currentDiff > M_PI)
+        currentDiff -= 2.0f * M_PI;
+
+      // 物理贴脸障碍检测
+      float checkDist = 8.0f;
+      float frontX = tkEnemy.x + cos(tkEnemy.turretAngle) * checkDist;
+      float frontY = tkEnemy.y + sin(tkEnemy.turretAngle) * checkDist;
+      bool clearFront = checkLineOfSight(tkEnemy.x, tkEnemy.y, frontX, frontY);
+
+      // 开火限制：只有炮管已经平滑转到基本对准玩家（夹角绝对值小于约 12
+      // 度/0.21弧度）且前方没贴墙时才开火
+      if (clearFront && (abs(currentDiff) < 0.21f) &&
+          (now - tkEnemy.lastShot > 800)) {
         tkEnemy.lastShot = now;
         for (int b = 0; b < MAX_TRBL_BULLETS; b++) {
           if (!tkBullets[b].active) {
             tkBullets[b].active = true;
             tkBullets[b].bouncesLeft = 5;
-            tkBullets[b].fromEnemy = true; // 👈 标记：AI 的炮弹
+            tkBullets[b].fromEnemy = true;
             tkBullets[b].x = tkEnemy.x + cos(tkEnemy.turretAngle) * 5.0f;
             tkBullets[b].y = tkEnemy.y + sin(tkEnemy.turretAngle) * 5.0f;
             tkBullets[b].vx = cos(tkEnemy.turretAngle) * 2.5f;
@@ -363,26 +429,11 @@ void handleTankTroubleMode(int vry, int vrx, bool clicked) {
         }
       }
     } else {
+      // 没看到玩家时，维持原有的雷达范围扫射表现
       tkEnemy.turretAngle += 0.08f * tkEnemy.sweepDir * dt;
       float centerAngle = atan2(playerY - tkEnemy.y, playerX - tkEnemy.x);
       if (abs(tkEnemy.turretAngle - centerAngle) > 0.6f) {
         tkEnemy.sweepDir = -tkEnemy.sweepDir;
-      }
-
-      if (now - tkEnemy.lastShot > 2300) {
-        tkEnemy.lastShot = now;
-        for (int b = 0; b < MAX_TRBL_BULLETS; b++) {
-          if (!tkBullets[b].active) {
-            tkBullets[b].active = true;
-            tkBullets[b].bouncesLeft = 5;
-            tkBullets[b].fromEnemy = true;
-            tkBullets[b].x = tkEnemy.x + cos(tkEnemy.turretAngle) * 5.0f;
-            tkBullets[b].y = tkEnemy.y + sin(tkEnemy.turretAngle) * 5.0f;
-            tkBullets[b].vx = cos(tkEnemy.turretAngle) * 2.0f;
-            tkBullets[b].vy = sin(tkEnemy.turretAngle) * 2.0f;
-            break;
-          }
-        }
       }
     }
   }
