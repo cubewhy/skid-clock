@@ -125,29 +125,27 @@ void handleFreeKeyMode(int vry, int vrx, bool clicked) {
         if (b.w > b.h) {
           if (dx != 0) {
             int8_t nx = b.x + dx;
-            // Dynamically check win conditions based on the width of the key
-            // piece
-            if (b.isKey && nx == (GRID_SIZE - b.w)) {
-              b.x = nx;
-              fkMoves++;
-              fkLevelComplete = true;
-              lastJoyAction = millis();
-              return;
-            }
+
             if (nx >= 0 && nx + b.w <= GRID_SIZE &&
                 canPlaceBlock(nx, b.y, b.w, b.h, fkSelectedIdx)) {
+
               b.x = nx;
               fkCursorX = b.x;
+
+              if (b.isKey && nx == (GRID_SIZE - b.w)) {
+                fkMoves++;
+                fkLevelComplete = true;
+                lastJoyAction = millis();
+                return;
+              }
             }
           }
-        } else {
-          if (dy != 0) {
-            int8_t ny = b.y + dy;
-            if (ny >= 0 && ny + b.h <= GRID_SIZE &&
-                canPlaceBlock(b.x, ny, b.w, b.h, fkSelectedIdx)) {
-              b.y = ny;
-              fkCursorY = b.y;
-            }
+        } else if (dy != 0) {
+          int8_t ny = b.y + dy;
+          if (ny >= 0 && ny + b.h <= GRID_SIZE &&
+              canPlaceBlock(b.x, ny, b.w, b.h, fkSelectedIdx)) {
+            b.y = ny;
+            fkCursorY = b.y;
           }
         }
         if (b.x != oldX || b.y != oldY)
