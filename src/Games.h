@@ -66,4 +66,10 @@ void handleJumpJumpMode(int vry, int vrx, bool clicked);
 void initFlappyGame();
 void handleFlappyMode(int vry, int vrx, bool clicked);
 
+void initPinGame();
+void handlePinGameMode(int vry, int vrx, bool clicked);
+
+void initWhacGame();
+void handleWhacGameMode(int vry, int vrx, bool clicked);
+
 #endif
