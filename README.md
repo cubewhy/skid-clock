@@ -81,6 +81,8 @@ make generate
 - 传说之下 (简易版本)
 - 跳一跳
 - Flappy Bird
+- 见缝插针
+- 打地鼠
 
 ## 使用指南
 
@@ -261,13 +263,21 @@ make generate
 
 - 摇杆移动
 
-## 跳一跳
+### 跳一跳
 
 - 拉摇杆蓄力
 
-## Flappy Bird
+### Flappy Bird
 
 - 拉摇杆向上飞行
+
+### 见缝插针
+
+- 拉摇杆发射
+
+### 打地鼠
+
+- 移动摇杆敲击
 
 ## License
 
