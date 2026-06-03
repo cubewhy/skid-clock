@@ -22,8 +22,7 @@ static float aaWheelSpeed = 0.04f;
 static float aaFlyingY = 56.0f;
 static bool aaNeedleFlying = false;
 static bool aaFirstFrame = true;
-static bool aaFireLocked =
-    false; // 用于发射锁，同时也复用于结算界面的摇杆释放锁
+static bool aaFireLocked = false;
 static bool aaGameOver = false;
 static bool aaGameWin = false;
 static unsigned long aaLastTick = 0;
@@ -65,10 +64,9 @@ void initPinGame() {
 }
 
 void handlePinGameMode(int vry, int vrx, bool clicked) {
-  // 提前计算摇杆是否被推开，供后续逻辑统一使用
+  // 提前计算摇杆是否被推开
   bool joyPushed = (vrx < 1500 || vrx > 2500 || vry < 1500 || vry > 2500);
 
-  // 处理游戏结束与通关状态
   if (aaGameOver || aaGameWin) {
     if (!joyPushed) {
       aaFireLocked = false;
@@ -107,6 +105,7 @@ void handlePinGameMode(int vry, int vrx, bool clicked) {
       display.setCursor(15, 50);
       display.print(F("[Click/Joy] Exit"));
     }
+    display.display();
     return;
   }
 
@@ -147,11 +146,13 @@ void handlePinGameMode(int vry, int vrx, bool clicked) {
   }
 
   // 3. 飞针运动与碰撞判定
+  bool showHitFrame = false;
   if (aaNeedleFlying) {
     aaFlyingY -= 4.5f * dt;
 
     if (aaFlyingY <= (WHEEL_Y + WHEEL_RADIUS)) {
       aaNeedleFlying = false;
+      showHitFrame = true; // 记录这一帧刚好撞击
 
       float hitAngle = M_PI_2 - aaWheelAngle;
       while (hitAngle < 0)
@@ -172,15 +173,13 @@ void handlePinGameMode(int vry, int vrx, bool clicked) {
 
       if (collision) {
         aaGameOver = true;
-        aaFireLocked =
-            joyPushed; // 失败瞬间如果摇杆还推着，直接锁死结算界面跳转
+        aaFireLocked = joyPushed;
       } else {
         aaNeedles[aaPinnedCount++] = {hitAngle, true};
         aaRemainingNeedles--;
         if (aaRemainingNeedles == 0) {
           aaGameWin = true;
-          aaFireLocked =
-              joyPushed; // 胜利瞬间如果摇杆还推着，直接锁死结算界面跳转
+          aaFireLocked = joyPushed;
         }
       }
     }
@@ -219,14 +218,21 @@ void handlePinGameMode(int vry, int vrx, bool clicked) {
     display.fillCircle(endX, endY, 1, SSD1306_WHITE);
   }
 
-  // 绘制发射队列中等待的针
+  // 绘制发射队列中等待的针/飞行中的针
   if (aaNeedleFlying) {
     display.drawLine(WHEEL_X, (int)aaFlyingY, WHEEL_X,
                      (int)aaFlyingY + NEEDLE_LENGTH, SSD1306_WHITE);
     display.fillCircle(WHEEL_X, (int)aaFlyingY + NEEDLE_LENGTH, 1,
                        SSD1306_WHITE);
+  } else if (showHitFrame) {
+    display.drawLine(WHEEL_X, WHEEL_Y + WHEEL_RADIUS, WHEEL_X,
+                     WHEEL_Y + WHEEL_RADIUS + NEEDLE_LENGTH, SSD1306_WHITE);
+    display.fillCircle(WHEEL_X, WHEEL_Y + WHEEL_RADIUS + NEEDLE_LENGTH, 1,
+                       SSD1306_WHITE);
   } else if (aaRemainingNeedles > 0) {
     display.drawLine(WHEEL_X, 56, WHEEL_X, 56 + NEEDLE_LENGTH, SSD1306_WHITE);
     display.fillCircle(WHEEL_X, 56 + NEEDLE_LENGTH, 1, SSD1306_WHITE);
   }
+
+  display.display();
 }
