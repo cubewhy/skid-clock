@@ -5,28 +5,26 @@ struct MoleHole {
   int16_t x, y;
 };
 
-// 围绕中央建立 8 方向九宫格空间坐标 (跳过正中央 [1,1])
 static const MoleHole holes[8] = {
-    {34, 20}, // 0: 左上 (Top-Left)
-    {64, 18}, // 1: 正上 (Top)
-    {94, 20}, // 2: 右上 (Top-Right)
-    {30, 38}, // 3: 正左 (Left)
-    {98, 38}, // 4: 正右 (Right)
-    {34, 56}, // 5: 左下 (Bottom-Left)
-    {64, 58}, // 6: 正下 (Bottom)
-    {94, 56}  // 7: 右下 (Bottom-Right)
+    {34, 20}, {64, 18}, {94, 20}, // 0, 1, 2
+    {30, 38}, {98, 38},           // 3, 4
+    {34, 56}, {64, 58}, {94, 56}  // 5, 6, 7
 };
 
 static int8_t activeMoleHole = -1;
 static unsigned long moleSpawnTime = 0;
-static unsigned long moleDuration = 1200; // 地鼠在洞口停留基础时间(ms)
+static unsigned long moleDuration = 1200;
 static int whacScore = 0;
 static int whacLives = 3;
 static bool whacGameOver = false;
-static bool whacJoyReleased = true;
-static int8_t playerHammerPos = -1; // 玩家当前摇杆指向的目标洞口
 
-// 辅助工具函数：把摇杆模拟量精确解算映射至 8 个孔洞索引上
+static int8_t lastJoyDir = -1;
+static int8_t playerHammerPos = -1;
+
+static unsigned long moleEmptyStartTime = 0;
+static unsigned long moleEmptyDuration = 200;
+static bool isWaitingForMole = false;
+
 static int8_t getWhacDirection(int vrx, int vry) {
   bool left = (vrx < 1200);
   bool right = (vrx > 2800);
@@ -34,33 +32,34 @@ static int8_t getWhacDirection(int vrx, int vry) {
   bool down = (vry > 2800);
 
   if (up && left)
-    return 0; // 左上
+    return 0;
   if (up && right)
-    return 2; // 右上
+    return 2;
   if (down && left)
-    return 5; // 左下
+    return 5;
   if (down && right)
-    return 7; // 右下
+    return 7;
   if (up)
-    return 1; // 正上
+    return 1;
   if (left)
-    return 3; // 正左
+    return 3;
   if (right)
-    return 4; // 正右
+    return 4;
   if (down)
-    return 6; // 正下
+    return 6;
 
-  return -1; // 摇杆居中空闲
+  return -1;
 }
 
 void initWhacGame() {
   whacScore = 0;
   whacLives = 3;
   whacGameOver = false;
-  whacJoyReleased = true;
+  lastJoyDir = -1;
   activeMoleHole = -1;
   playerHammerPos = -1;
   moleDuration = 1200;
+  isWaitingForMole = false;
 }
 
 void handleWhacGameMode(int vry, int vrx, bool clicked) {
@@ -81,17 +80,29 @@ void handleWhacGameMode(int vry, int vrx, bool clicked) {
   }
 
   unsigned long now = millis();
+  int8_t currentDir = getWhacDirection(vrx, vry);
+  playerHammerPos = currentDir;
 
-  // 1. 无地鼠时生成新地鼠
+  // 1. 地鼠生成与生死逻辑（加入出生空档期）
   if (activeMoleHole == -1) {
-    activeMoleHole = random(0, 8);
-    moleSpawnTime = now;
-    // 动态难度：随分数提高加快缩回速度，最低保留 450ms 窗口期
-    moleDuration = 1200 - (whacScore * 40);
-    if (moleDuration < 450)
-      moleDuration = 450;
+    if (!isWaitingForMole) {
+      // 刚击中或刚漏掉，触发空档等待
+      isWaitingForMole = true;
+      moleEmptyStartTime = now;
+      moleEmptyDuration = random(200, 500); // 随机 200~500ms 的无地鼠安全期
+    }
+
+    if (now - moleEmptyStartTime > moleEmptyDuration) {
+      // 空档期结束，真正生成地鼠
+      activeMoleHole = random(0, 8);
+      moleSpawnTime = now;
+      moleDuration = 1200 - (whacScore * 40);
+      if (moleDuration < 450)
+        moleDuration = 450;
+      isWaitingForMole = false;
+    }
   } else {
-    // 2. 地鼠时间结束未被打中，从洞口溜走 (漏地鼠扣血)
+    // 地鼠超时未被打中，溜走
     if (now - moleSpawnTime > moleDuration) {
       activeMoleHole = -1;
       whacLives--;
@@ -102,25 +113,17 @@ void handleWhacGameMode(int vry, int vrx, bool clicked) {
     }
   }
 
-  // 3. 摇杆打击逻辑判定
-  int8_t currentDir = getWhacDirection(vrx, vry);
-  playerHammerPos = currentDir; // 用于准星同步渲染
-
-  if (currentDir != -1) {
-    if (whacJoyReleased) {
-      whacJoyReleased = false; // 锁定，必须回正才能敲击下一次
-
-      // 精确切中探头的地鼠
-      if (currentDir == activeMoleHole) {
-        whacScore++;
-        activeMoleHole = -1; // 击中，立刻刷新消失
-      }
+  // 2. 【核心修改】改进型摇杆打击判定
+  // 只要当前方向有效，且“不等于上一帧的方向”，就视作一次全新的有力挥锤！
+  if (currentDir != -1 && currentDir != lastJoyDir) {
+    if (currentDir == activeMoleHole) {
+      whacScore++;
+      activeMoleHole = -1; // 瞬间击中，转入空档期
     }
-  } else {
-    whacJoyReleased = true; // 摇杆回正复位
   }
+  lastJoyDir = currentDir; // 更新方向历史
 
-  // 4. 图形渲染层
+  // 3. 图形渲染层
   display.clearDisplay();
 
   // 顶部状态栏
@@ -134,33 +137,30 @@ void handleWhacGameMode(int vry, int vrx, bool clicked) {
   display.print(whacLives);
   display.drawFastHLine(0, 9, 128, SSD1306_WHITE);
 
-  // 遍历绘制 8 个地鼠洞及内容
+  // 绘制 8 个洞口
   for (int i = 0; i < 8; i++) {
-    // 绘制基本地鼠洞口椭圆基底
     display.drawRoundRect(holes[i].x - 8, holes[i].y - 2, 16, 5, 2,
                           SSD1306_WHITE);
 
-    // 如果该洞当前有地鼠冒出来
+    // 绘制地鼠
     if (i == activeMoleHole) {
-      // 绘制冒出的精细地鼠实体（头部小实心圆加五官）
       display.fillCircle(holes[i].x, holes[i].y - 4, 4, SSD1306_WHITE);
-      display.fillRect(holes[i].x - 2, holes[i].y - 2, 5, 3,
-                       SSD1306_WHITE); // 身体
-      display.drawPixel(holes[i].x - 1, holes[i].y - 5,
-                        SSD1306_BLACK); // 眼睛 L
-      display.drawPixel(holes[i].x + 1, holes[i].y - 5,
-                        SSD1306_BLACK); // 眼睛 R
+      display.fillRect(holes[i].x - 2, holes[i].y - 2, 5, 3, SSD1306_WHITE);
+      display.drawPixel(holes[i].x - 1, holes[i].y - 5, SSD1306_BLACK);
+      display.drawPixel(holes[i].x + 1, holes[i].y - 5, SSD1306_BLACK);
     }
 
-    // 绘制玩家当前摇杆指向的打击准星/框（如果指到该方向）
+    // 绘制准星
     if (i == playerHammerPos) {
       display.drawCircle(holes[i].x, holes[i].y - 3, 7, SSD1306_WHITE);
-      // 附加两根细线表示准心十字线
       display.drawFastHLine(holes[i].x - 9, holes[i].y - 3, 3, SSD1306_WHITE);
       display.drawFastHLine(holes[i].x + 7, holes[i].y - 3, 3, SSD1306_WHITE);
     }
   }
 
-  // 在中央空地上绘制装饰性质的摇杆状态原点
+  // 中央装饰原点
   display.drawCircle(64, 38, 2, SSD1306_WHITE);
+
+  // 注：如果主 loop 没有统一调用 display.display()，请在此处加上：
+  // display.display();
 }
