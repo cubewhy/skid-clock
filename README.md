@@ -1,7 +1,10 @@
 # Skid Clock
 
 > [!IMPORTANT]
-> 我重新制作了硬件, 新版硬件在 [cubewhy/skid-clock-v2](https://github.com/cubewhy/skid-clock-v2) 开源。
+> 我重新设计了硬件, 新版硬件在 [cubewhy/skid-clock-v2](https://github.com/cubewhy/skid-clock-v2) 开源。
+> 
+> 新版硬件要求3D 打印, 若无条件可以尝试组装旧版 skid-clock。
+> 
 > 此仓库停止维护。
 
 ![image](./.github/docs/images/the-skid-clock.webp)
