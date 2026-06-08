@@ -1,5 +1,9 @@
 # Skid Clock
 
+> [!IMPORTANT]
+> 我重新制作了硬件, 新版硬件在 [cubewhy/skid-clock-v2](https://github.com/cubewhy/skid-clock-v2) 开源。
+> 此仓库停止维护。
+
 ![image](./.github/docs/images/the-skid-clock.webp)
 
 还在为水课发愁吗? 试试这款桌面时钟, 有一个 ESP32 就可以制作, 轻松跳过水课!
